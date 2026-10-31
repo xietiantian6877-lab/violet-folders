@@ -10,7 +10,7 @@ Browser preview with example paths. The desktop appearance varies with the backg
 
 ## Run the portable app
 
-Run `H:\CZWJJ\release\VioletFolders-1.2.0-win-x64.exe`, or extract `VioletFolders-1.2.0-win-x64.zip` from the same directory and launch the app. The portable package includes Electron and the native capture module, so users do not need Node.js, .NET, Visual Studio, or the Windows SDK. Repository users with access can also download it from GitHub Releases.
+Run `H:\CZWJJ\release\VioletFolders-1.2.1-win-x64.exe`, or extract `VioletFolders-1.2.1-win-x64.zip` from the same directory and launch the app. The portable package includes Electron and the native capture module, so users do not need Node.js, .NET, Visual Studio, or the Windows SDK. Repository users with access can also download it from GitHub Releases.
 
 1. Open a folder in Windows File Explorer. Each detected path gets an independent glass row; duplicate paths are merged.
 2. The final folder name is prominent, with the parent path as supporting information. Hover for the complete path.
@@ -63,7 +63,7 @@ To remove the app, turn off start at sign-in, quit, and delete its portable file
 
 ## Develop and package
 
-Requires Windows x64, Node.js 22 or later, npm, Visual Studio C++ x64 build tools, and a Windows SDK with C++/WinRT. Source builds do not require .NET. These compilation tools build the native capture module; the packaged app does not require them.
+Requires Windows x64, Node.js 22.12 or later, npm, Visual Studio C++ x64 build tools, and a Windows SDK with C++/WinRT. Source builds do not require .NET. These compilation tools build the native capture module; the packaged app does not require them.
 
 ```powershell
 Set-Location H:\CZWJJ
@@ -87,7 +87,7 @@ npm run build       # TypeScript checks and Vite build
 npm run dist        # Native module, renderer, Windows x64 EXE / ZIP, and checksums
 ```
 
-`npm run dev` and `npm run dist` run `npm run build:native` first. The Windows one-command entry point is `.\scripts\build.ps1`. It installs dependencies, runs tests, and invokes the current Electron project's `npm run dist`. Use `-SkipInstall` when dependencies are already installed.
+`npm run dev` runs `npm run build:native` first. `npm run dist` prepares the Electron runtime before building the native module and renderer; it downloads a missing runtime and stops packaging if preparation fails. The Windows one-command entry point is `.\scripts\build.ps1`. It installs dependencies, runs tests, and invokes the current Electron project's `npm run dist`. Use `-SkipInstall` when dependencies are already installed.
 
 The renderer builds into `dist-renderer/`. Portable packages and SHA-256 checksums go into `release/`. `npm run preview` is a browser UI preview only and does not connect to the real Explorer session.
 
@@ -95,16 +95,16 @@ The UI component is `renderer/App.tsx`, with mounting in `renderer/main.tsx` and
 
 ```text
 release/
-  VioletFolders-1.2.0-win-x64.exe
-  VioletFolders-1.2.0-win-x64.zip
-  VioletFolders-1.2.0-win-x64.exe.sha256
-  VioletFolders-1.2.0-win-x64.zip.sha256
+  VioletFolders-1.2.1-win-x64.exe
+  VioletFolders-1.2.1-win-x64.zip
+  VioletFolders-1.2.1-win-x64.exe.sha256
+  VioletFolders-1.2.1-win-x64.zip.sha256
   SHA256SUMS.txt
 ```
 
 ## GitHub releases
 
-GitHub Actions uses Node.js 24 to install with `npm ci`, test, build, and package Windows artifacts. `npm run dist` builds the native capture module automatically. It saves the EXE, ZIP, and checksums. A version tag such as `v1.2.0` creates a GitHub Release or updates the assets of an existing release. Repository permissions determine visibility.
+GitHub Actions uses Node.js 24 to install with `npm ci`, test, build, and package Windows artifacts. `npm run dist` prepares the Electron runtime and builds the native capture module automatically. It saves the EXE, ZIP, and checksums. A version tag such as `v1.2.1` creates a GitHub Release or updates the assets of an existing release. Repository permissions determine visibility.
 
 ## Preserved WPF source
 

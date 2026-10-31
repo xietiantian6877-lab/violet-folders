@@ -10,7 +10,7 @@
 
 ## 直接运行
 
-双击 `H:\CZWJJ\release\VioletFolders-1.2.0-win-x64.exe`，或者解压同目录的 `VioletFolders-1.2.0-win-x64.zip` 后运行应用。便携包包含 Electron 运行时和原生捕获模块，使用时无需另装 Node.js、.NET、Visual Studio 或 Windows SDK。有仓库访问权限的用户也可以从 GitHub Release 下载。
+双击 `H:\CZWJJ\release\VioletFolders-1.2.1-win-x64.exe`，或者解压同目录的 `VioletFolders-1.2.1-win-x64.zip` 后运行应用。便携包包含 Electron 运行时和原生捕获模块，使用时无需另装 Node.js、.NET、Visual Studio 或 Windows SDK。有仓库访问权限的用户也可以从 GitHub Release 下载。
 
 1. 正常打开 Windows 文件资源管理器中的文件夹。每个检测到的路径显示为独立玻璃条，相同路径合并。
 2. 最后一级文件夹名突出显示，父路径作为辅助信息；悬停查看完整路径。
@@ -63,7 +63,7 @@
 
 ## 从源码运行与打包
 
-需要 Windows x64、Node.js 22 或更新版本和 npm，以及 Visual Studio C++ x64 构建工具和带 C++/WinRT 的 Windows SDK。源码构建不需要 .NET；这些编译工具只用于构建原生捕获模块，运行成品不需要安装。
+需要 Windows x64、Node.js 22.12 或更新版本和 npm，以及 Visual Studio C++ x64 构建工具和带 C++/WinRT 的 Windows SDK。源码构建不需要 .NET；这些编译工具只用于构建原生捕获模块，运行成品不需要安装。
 
 ```powershell
 Set-Location H:\CZWJJ
@@ -87,7 +87,7 @@ npm run build       # TypeScript 检查与 Vite 构建
 npm run dist        # 原生模块、渲染器及 Windows x64 EXE / ZIP 与校验文件
 ```
 
-`npm run dev` 与 `npm run dist` 会先执行 `npm run build:native`。Windows 一键构建入口为 `.\scripts\build.ps1`，默认安装依赖、运行测试并执行当前 Electron 项目的 `npm run dist`。已有依赖时可加 `-SkipInstall`。
+`npm run dev` 会先执行 `npm run build:native`。`npm run dist` 会先准备 Electron 运行时，再构建原生模块和渲染器；缺少运行时会自动下载，准备失败会停止打包。Windows 一键构建入口为 `.\scripts\build.ps1`，默认安装依赖、运行测试并执行当前 Electron 项目的 `npm run dist`。已有依赖时可加 `-SkipInstall`。
 
 构建的渲染器位于 `dist-renderer/`，便携产物与 SHA-256 校验文件位于 `release/`。`npm run preview` 仅用于浏览器界面预览，不会连接真实资源管理器。
 
@@ -95,16 +95,16 @@ npm run dist        # 原生模块、渲染器及 Windows x64 EXE / ZIP 与校�
 
 ```text
 release/
-  VioletFolders-1.2.0-win-x64.exe
-  VioletFolders-1.2.0-win-x64.zip
-  VioletFolders-1.2.0-win-x64.exe.sha256
-  VioletFolders-1.2.0-win-x64.zip.sha256
+  VioletFolders-1.2.1-win-x64.exe
+  VioletFolders-1.2.1-win-x64.zip
+  VioletFolders-1.2.1-win-x64.exe.sha256
+  VioletFolders-1.2.1-win-x64.zip.sha256
   SHA256SUMS.txt
 ```
 
 ## GitHub 发布
 
-GitHub Actions 使用 Node.js 24 执行 `npm ci`、测试、构建和 Windows 打包，`npm run dist` 自动构建原生捕获模块，保存 EXE、ZIP 与校验文件。推送版本标签（如 `v1.2.0`）会创建 GitHub Release；同名 Release 已存在时更新附件。仓库权限决定 Release 的可见范围。
+GitHub Actions 使用 Node.js 24 执行 `npm ci`、测试、构建和 Windows 打包，`npm run dist` 自动准备 Electron 运行时并构建原生捕获模块，保存 EXE、ZIP 与校验文件。推送版本标签（如 `v1.2.1`）会创建 GitHub Release；同名 Release 已存在时更新附件。仓库权限决定 Release 的可见范围。
 
 ## 保留的 WPF 源码
 
