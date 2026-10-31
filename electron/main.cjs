@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, screen, globalShortcut, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, globalShortcut, Tray, Menu, nativeImage, desktopCapturer, sharedTexture } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -9,6 +9,9 @@ const { randomUUID } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { FolderCatalog, normalizePath } = require('./folder-catalog.cjs');
 const { SettingsStore } = require('./settings-store.cjs');
+const { validateGlassPatch } = require('./glass-settings.cjs');
+const { DesktopSource } = require('./desktop-source.cjs');
+const { NativeDesktopCapture } = require('./native-desktop-capture.cjs');
 
 let window = null;
 let tray = null;
@@ -28,6 +31,8 @@ let monitorError;
 let restartAttempts = 0;
 let lastSnapshot = 0;
 let devURL = null;
+let desktopSource = null;
+let nativeDesktopCapture = null;
 const requests = new Map();
 const rendererFile = path.join(__dirname, '..', 'dist-renderer', 'index.html');
 // Set this before the singleton lock and userData are resolved so packaged and
@@ -62,8 +67,17 @@ async function start() {
   hitTimer.unref();
   createTray();
   globalShortcut.register('CommandOrControl+Alt+F', () => changeCollapsed(!settings.collapsed));
-  screen.on('display-metrics-changed', () => { clampBounds(); sendState(); });
-  screen.on('display-removed', () => { clampBounds(); sendState(); });
+  const refreshDisplays = () => {
+    nativeDesktopCapture?.stop();
+    desktopSource?.invalidateSource();
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('violet:desktop-geometry', null);
+    clampBounds(); sendState();
+    const geometry = desktopSource?.refreshGeometry();
+    if (geometry && window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('violet:desktop-geometry', geometry);
+  };
+  screen.on('display-added', refreshDisplays);
+  screen.on('display-metrics-changed', refreshDisplays);
+  screen.on('display-removed', refreshDisplays);
   startWorker();
   watchdog = setInterval(() => {
     if (!quitting && lastSnapshot && Date.now() - lastSnapshot > 8000 && monitorStatus !== 'error') {
@@ -90,19 +104,50 @@ function createWindow() {
   });
   window.setAlwaysOnTop(true, 'screen-saver');
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  window.setIgnoreMouseEvents(true, { forward: true });
   clampBounds();
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.on('will-attach-webview', event => event.preventDefault());
-  window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  window.webContents.session.setPermissionCheckHandler(() => false);
-  window.webContents.on('did-finish-load', sendState);
-  window.once('ready-to-show', () => { window.showInactive(); sendState(); });
-  window.on('move', () => { sendState(); scheduleSave(); });
-  window.on('resize', () => { sendState(); scheduleSave(); });
-  window.on('closed', () => { window = null; app.quit(); });
+  window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => {
+    callback(desktopPermissionAllowed(contents, permission, details) &&
+      Array.isArray(details.mediaTypes) && details.mediaTypes.length === 1 && details.mediaTypes[0] === 'video');
+  });
+  window.webContents.session.setPermissionCheckHandler((contents, permission, requestingOrigin, details) =>
+    desktopPermissionAllowed(contents, permission, details) && permissionOriginMatches(requestingOrigin) && details.mediaType === 'video');
+  window.webContents.on('did-finish-load', () => { nativeDesktopCapture?.stop(); sendState(); desktopSource?.refreshGeometry(); });
+  window.once('ready-to-show', () => {
+    window.showInactive();
+    desktopSource?.refreshProtection();
+    sendState();
+  });
+  window.on('move', () => { sendState(); scheduleSave(); desktopSource?.refreshGeometry(); });
+  window.on('resize', () => { sendState(); scheduleSave(); desktopSource?.refreshGeometry(); });
+  window.on('closed', () => { nativeDesktopCapture?.destroy(); nativeDesktopCapture = null; desktopSource?.destroy(); desktopSource = null; window = null; app.quit(); });
+  desktopSource = new DesktopSource({ window, screen, desktopCapturer, onGeometry: geometry => {
+    nativeDesktopCapture?.geometryChanged(geometry);
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('violet:desktop-geometry', geometry);
+  } });
+  nativeDesktopCapture = new NativeDesktopCapture({ window, source: desktopSource, onFrame: sendDesktopFrame });
+  desktopSource.setEnabled(settings.glass.desktopRefraction);
+  // Apply native exclusion before Electron adds its click-through layered
+  // window state, which can reject the first display-affinity assignment.
+  window.setIgnoreMouseEvents(true, { forward: true });
   if (devURL) window.loadURL(devURL); else window.loadFile(rendererFile);
+}
+
+async function sendDesktopFrame({ frame, geometry, release }) {
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) { release(); return; }
+  let imported;
+  try {
+    imported = sharedTexture.importSharedTexture({
+      textureInfo: { pixelFormat: 'bgra', codedSize: { width: frame.width, height: frame.height },
+        timestamp: frame.timestamp, handle: { ntHandle: frame.ntHandle } },
+      allReferencesReleased: release,
+    });
+    await sharedTexture.sendSharedTexture({ frame: window.webContents.mainFrame, importedSharedTexture: imported }, geometry);
+  } catch {
+    if (!imported) release();
+  } finally { imported?.release(); }
 }
 
 function iconPath() {
@@ -117,7 +162,7 @@ function getState() {
   const area = workArea();
   const bounds = window && !window.isDestroyed() ? window.getBounds() : settings.bounds;
   return {
-    entries: catalog.entries, collapsed: settings.collapsed, language: settings.language,
+    entries: catalog.entries, collapsed: settings.collapsed, language: settings.language, glass: settings.glass,
     launchAtLogin: app.isPackaged ? app.getLoginItemSettings({ path: startupExecutable() }).openAtLogin : false,
     launchAtLoginSupported: app.isPackaged, monitorStatus,
     ...(monitorError ? { error: monitorError } : {}),
@@ -193,9 +238,29 @@ function resetPosition() { const area = screen.getPrimaryDisplay().workArea; win
 
 function trusted(event) {
   if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return false;
-  const origin = event.senderFrame.url;
+  return trustedURL(event.senderFrame.url);
+}
+
+function trustedURL(origin) {
+  if (typeof origin !== 'string') return false;
   if (devURL) { try { return new URL(origin).origin === new URL(devURL).origin; } catch { return false; } }
   return origin.split(/[?#]/, 1)[0] === pathToFileURL(rendererFile).href;
+}
+
+function permissionOriginMatches(origin) {
+  if (typeof origin !== 'string') return false;
+  try {
+    const actual = new URL(origin);
+    const expected = new URL(devURL || pathToFileURL(rendererFile).href);
+    return actual.protocol === expected.protocol && actual.origin === expected.origin;
+  } catch { return false; }
+}
+
+function desktopPermissionAllowed(contents, permission, details) {
+  return permission === 'display-capture' && Boolean(window && !window.isDestroyed() &&
+    contents === window.webContents && !window.webContents.isDestroyed() && settings?.glass.desktopRefraction && desktopSource?.protected &&
+    details?.isMainFrame === true && trustedURL(window.webContents.mainFrame.url) && trustedURL(details.requestingUrl) &&
+    (details.securityOrigin === undefined || permissionOriginMatches(details.securityOrigin)));
 }
 
 function handle(channel, callback) {
@@ -213,6 +278,14 @@ function knownPath(value) {
 
 function installIPC() {
   handle('violet:get-state', getState);
+  handle('violet:get-desktop-source', options => {
+    if (options !== undefined && (!options || typeof options !== 'object' || Array.isArray(options) ||
+      Object.keys(options).some(key => key !== 'refresh') || (Object.hasOwn(options, 'refresh') && typeof options.refresh !== 'boolean'))) {
+      return { ok: false, error: 'invalid-desktop-source-request' };
+    }
+    return nativeDesktopCapture?.start(options?.refresh === true) || { ok: false, error: 'desktop-capture-unavailable' };
+  });
+  handle('violet:stop-desktop-capture', () => { nativeDesktopCapture?.stop(); return { ok: true }; });
   handle('violet:open-folder', value => {
     const folder = knownPath(value);
     return folder ? openFolder(folder) : { ok: false, error: 'invalid-folder' };
@@ -230,6 +303,13 @@ function installIPC() {
   handle('violet:set-language', value => {
     if (!['zh-CN', 'en'].includes(value)) return { ok: false, error: 'invalid-value' };
     changeLanguage(value); return { ok: true };
+  });
+  handle('violet:set-glass-settings', value => {
+    if (!validateGlassPatch(value)) return { ok: false, error: 'invalid-value' };
+    settings.glass = { ...settings.glass, ...value };
+    desktopSource?.setEnabled(settings.glass.desktopRefraction);
+    scheduleSave(); sendState();
+    return { ok: true };
   });
   handle('violet:set-launch-at-login', value => {
     if (typeof value !== 'boolean') return { ok: false, error: 'invalid-value' };
@@ -358,6 +438,8 @@ app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
   if (quitting) return;
   quitting = true;
+  nativeDesktopCapture?.destroy(); nativeDesktopCapture = null;
+  desktopSource?.destroy(); desktopSource = null;
   clearTimeout(restartTimer); clearTimeout(saveTimer); clearInterval(watchdog); clearInterval(hitTimer);
   save(); globalShortcut.unregisterAll(); tray?.destroy();
   for (const pending of requests.values()) { clearTimeout(pending.timer); pending.resolve({ ok: false, error: 'monitor-unavailable' }); }

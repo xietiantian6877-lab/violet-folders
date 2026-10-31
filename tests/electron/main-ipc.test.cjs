@@ -10,6 +10,9 @@ const { EventEmitter } = require('node:events');
 const { PassThrough, Writable } = require('node:stream');
 const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
+const { DEFAULT_GLASS_SETTINGS } = require('../../electron/glass-settings.cjs');
+const { DesktopSource } = require('../../electron/desktop-source.cjs');
+const { NativeDesktopCapture } = require('../../electron/native-desktop-capture.cjs');
 
 const mainFile = path.resolve(__dirname, '../../electron/main.cjs');
 const mainSource = fs.readFileSync(mainFile, 'utf8');
@@ -26,6 +29,9 @@ async function createHarness(t, options = {}) {
   const timers = new Set();
   const intervalCallbacks = new Map();
   const errors = [];
+  const sourceCalls = [];
+  const nativeSessions = [];
+  const transfers = [];
   const app = new EventEmitter();
   Object.assign(app, {
     isPackaged: options.packaged === true,
@@ -47,7 +53,7 @@ async function createHarness(t, options = {}) {
   });
   const area = { x: 0, y: 0, width: 1280, height: 800, ...options.workArea };
   const screen = new EventEmitter();
-  screen.getDisplayMatching = screen.getPrimaryDisplay = () => ({ workArea: area });
+  screen.getDisplayMatching = screen.getPrimaryDisplay = () => ({ id: 42, bounds: area, workArea: area, scaleFactor: 1 });
   const cursor = { x: -9999, y: -9999 };
   screen.getCursorScreenPoint = () => ({ ...cursor });
 
@@ -57,6 +63,7 @@ async function createHarness(t, options = {}) {
       this.options = settings;
       this.bounds = { x: settings.x, y: settings.y, width: Math.max(settings.minWidth, settings.width), height: Math.max(settings.minHeight, settings.height) };
       this.mouseCalls = [];
+      this.protectionCalls = [];
       this.webContents = new EventEmitter();
       Object.assign(this.webContents, {
         mainFrame: { url: '' },
@@ -66,7 +73,7 @@ async function createHarness(t, options = {}) {
         },
         isDestroyed: () => false,
         setWindowOpenHandler(callback) { this.openHandler = callback; },
-        send(channel, state) { this.lastSent = { channel, state }; },
+        send(channel, state) { this.lastSent = { channel, state }; (this.sentMessages ??= []).push({ channel, state }); },
       });
       windows.push(this);
     }
@@ -74,8 +81,18 @@ async function createHarness(t, options = {}) {
     isVisible() { return this.shown === true; }
     setAlwaysOnTop(value, level) { this.alwaysOnTop = { value, level }; }
     setVisibleOnAllWorkspaces() {}
-    setIgnoreMouseEvents(ignore, settings) { this.mouseCalls.push({ ignore, settings }); }
+    setIgnoreMouseEvents(ignore, settings) {
+      this.mouseCalls.push({ ignore, settings });
+      this.ignoreMouse = ignore;
+    }
+    setContentProtection(value) {
+      this.protectionCalls.push(value);
+      if (options.layeredProtectionOrdering && value && this.ignoreMouse && !this.nativeProtected)
+        throw new Error('Initial exclusion cannot be applied after click-through');
+      if (this.shown || options.layeredProtectionOrdering) this.nativeProtected = value;
+    }
     getBounds() { return { ...this.bounds }; }
+    getNativeWindowHandle() { return Buffer.alloc(8, 1); }
     getContentSize() { return [this.bounds.width, this.bounds.height]; }
     setContentSize(width, height) { this.bounds.width = width; this.bounds.height = height; this.emit('resize'); }
     setPosition(x, y) { this.bounds.x = x; this.bounds.y = y; this.emit('move'); }
@@ -98,6 +115,11 @@ async function createHarness(t, options = {}) {
     Menu: { buildFromTemplate: value => value },
     nativeImage: { createFromPath: () => image, createFromDataURL: () => image },
     globalShortcut: { register: () => true, unregisterAll() {} },
+    desktopCapturer: { async getSources(options) { sourceCalls.push(options); return [{ id: 'screen:42:0', display_id: '42' }]; } },
+    sharedTexture: {
+      importSharedTexture(options) { return { options, release() { options.allReferencesReleased(); } }; },
+      async sendSharedTexture(options, geometry) { transfers.push({ options, geometry }); },
+    },
   };
   function spawn(executable, args, settings) {
     const child = new EventEmitter();
@@ -118,7 +140,18 @@ async function createHarness(t, options = {}) {
     return child;
   }
   const sandbox = {
-    require: name => name === 'electron' ? electron : name === 'node:child_process' ? { spawn } : realRequire(name),
+    require: name => name === 'electron' ? electron : name === 'node:child_process' ? { spawn } : name === './desktop-source.cjs'
+      ? { DesktopSource: class extends DesktopSource { constructor(settings) { super({ ...settings, platform: 'win32', release: '10.0.19045',
+        setProtection(_handle, enabled) { settings.window.setContentProtection(enabled); return enabled ? 0x11 : 0; },
+      }); } } }
+      : name === './native-desktop-capture.cjs' ? { NativeDesktopCapture: class extends NativeDesktopCapture {
+        constructor(settings) { super({ ...settings, settle: async () => {}, createCapture(options) {
+          assert.equal(windows[0].nativeProtected, true, 'capture requires protection on the shown native widget');
+          const controller = { cursorCaptureEnabled: false, closed: false, released: [], close() { this.closed = true; }, releaseFrame(id) { this.released.push(id); } };
+          nativeSessions.push({ options, controller });
+          return controller;
+        } }); }
+      } } : realRequire(name),
     __dirname: path.dirname(mainFile), __filename: mainFile, URL,
     process: { argv: ['node', mainFile], platform: 'win32', execPath: 'C:\\Violet\\VioletFolders.exe', resourcesPath: directory, env: { SystemRoot: 'C:\\Windows', ...(options.devURL ? { VITE_DEV_SERVER_URL: options.devURL } : {}) } },
     console: { error: (...args) => errors.push(args.join(' ')), log() {} },
@@ -139,7 +172,7 @@ async function createHarness(t, options = {}) {
   const window = windows[0];
   const event = () => ({ sender: window.webContents, senderFrame: window.webContents.mainFrame });
   return {
-    app, window, area, workers, handlers, listeners,
+    app, window, area, workers, handlers, listeners, sourceCalls, nativeSessions, transfers, screen,
     invoke: (name, value, sender = event()) => handlers.get('violet:' + name)(sender, value),
     send: (name, value, sender = event()) => listeners.get('violet:' + name)(sender, value),
     event,
@@ -164,6 +197,26 @@ test('main creates a sandboxed transparent topmost window and a shell-free hidde
   assert.equal(h.workers[0].spawnArguments.settings.shell, false);
   assert.equal(h.workers[0].spawnArguments.settings.windowsHide, true);
   assert.ok(h.workers[0].spawnArguments.args.includes('-Sta'));
+});
+
+test('shown native widgets receive exclusion again before any capture session starts', async t => {
+  const h = await createHarness(t, { packaged: true });
+  assert.equal(h.window.shown, true);
+  assert.equal(h.window.nativeProtected, true);
+  // Model a native widget replacement after startup; a new capture request
+  // must protect the current widget before allowing Desktop Duplication.
+  h.window.nativeProtected = false;
+  assert.equal((await h.invoke('get-desktop-source', { refresh: true })).ok, true);
+  assert.equal(h.window.nativeProtected, true);
+  assert.equal(h.nativeSessions.length, 1);
+});
+
+test('initial native exclusion precedes click-through so the automatic shown path can capture', async t => {
+  const h = await createHarness(t, { packaged: true, layeredProtectionOrdering: true });
+  assert.equal(h.window.ignoreMouse, true);
+  assert.equal(h.window.nativeProtected, true);
+  assert.equal((await h.invoke('get-desktop-source')).ok, true);
+  assert.equal(h.nativeSessions.length, 1);
 });
 
 test('IPC rejects other web contents, subframes and a navigated foreign origin', async t => {
@@ -221,6 +274,46 @@ test('valid collapse/language changes and retained pins are persisted, live hist
   assert.equal(h.invoke('get-state').entries[0].isOpen, false);
   h.invoke('toggle-pin', 'F:\\Pinned');
   assert.equal(h.invoke('get-state').entries.length, 0);
+});
+
+test('glass patches update published state immediately and persist after the debounce without replacing other preferences', async t => {
+  const h = await createHarness(t);
+  await h.snapshot([{ path: 'F:\\Pinned glass settings' }]);
+  h.invoke('toggle-pin', 'F:\\Pinned glass settings');
+  h.invoke('set-language', 'en');
+  h.invoke('set-collapsed', true);
+  assert.deepEqual({ ...h.invoke('get-state').glass }, DEFAULT_GLASS_SETTINGS);
+  assert.equal(h.invoke('set-glass-settings', { mode: 'polar', displacementScale: 123.5, blurAmount: 0.025, tintOpacity: 0.19 }).ok, true);
+  assert.equal(h.invoke('set-glass-settings', { overLight: true, desktopRefraction: false, cornerRadius: 24 }).ok, true);
+  const expected = { ...DEFAULT_GLASS_SETTINGS, mode: 'polar', displacementScale: 123.5, blurAmount: 0.025, tintOpacity: 0.19, overLight: true, desktopRefraction: false, cornerRadius: 24 };
+  assert.deepEqual({ ...h.invoke('get-state').glass }, expected);
+  assert.equal(h.window.webContents.lastSent.channel, 'violet:state');
+  assert.deepEqual({ ...h.window.webContents.lastSent.state.glass }, expected);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const saved = h.settings();
+  assert.deepEqual(saved.glass, expected);
+  assert.deepEqual(saved.pinnedPaths, ['F:\\Pinned glass settings']);
+  assert.equal(saved.language, 'en');
+  assert.equal(saved.collapsed, true);
+});
+
+test('glass IPC rejects invalid patches atomically and keeps the last valid optical state', async t => {
+  const h = await createHarness(t);
+  assert.equal(h.invoke('set-glass-settings', { mode: 'prominent', saturation: 180 }).ok, true);
+  const expected = { ...DEFAULT_GLASS_SETTINGS, mode: 'prominent', saturation: 180 };
+  for (const patch of [null, [], {}, 'standard', { mode: 'custom' }, { displacementScale: 201 }, { blurAmount: -0.1 }, { saturation: NaN }, { aberrationIntensity: Infinity }, { elasticity: '0.5' }, { cornerRadius: 101 }, { tintOpacity: 0.71 }, { overLight: 1 }, { desktopRefraction: 'false' }, { unknown: 1 }, { mode: 'shader', displacementScale: -1 }]) {
+    assert.equal(h.invoke('set-glass-settings', patch).error, 'invalid-value');
+    assert.deepEqual({ ...h.invoke('get-state').glass }, expected);
+  }
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(h.settings().glass, expected);
+});
+
+test('glass IPC rejects foreign web contents and subframes before mutating settings', async t => {
+  const h = await createHarness(t);
+  assert.throws(() => h.invoke('set-glass-settings', { mode: 'shader' }, { sender: {}, senderFrame: h.window.webContents.mainFrame }), /Untrusted IPC sender/u);
+  assert.throws(() => h.invoke('set-glass-settings', { mode: 'shader' }, { sender: h.window.webContents, senderFrame: { url: h.window.webContents.mainFrame.url } }), /Untrusted IPC sender/u);
+  assert.deepEqual({ ...h.invoke('get-state').glass }, DEFAULT_GLASS_SETTINGS);
 });
 
 test('content sizing near the bottom moves the shelf upward and preserves a usable header', async t => {
@@ -328,4 +421,111 @@ test('hit regions clip to the content bounds and clearing them restores click-th
   assert.equal(h.window.mouseCalls.at(-1).ignore, false);
   h.send('set-hit-regions', []);
   assert.equal(h.window.mouseCalls.at(-1).ignore, true);
+});
+
+test('desktop source IPC authenticates its caller and starts cursor-free native capture without thumbnails', async t => {
+  const h = await createHarness(t);
+  assert.throws(() => h.invoke('get-desktop-source', undefined, { sender: {}, senderFrame: h.window.webContents.mainFrame }), /Untrusted IPC sender/u);
+  assert.throws(() => h.invoke('get-desktop-source', undefined, { sender: h.window.webContents, senderFrame: { url: h.window.webContents.mainFrame.url } }), /Untrusted IPC sender/u);
+  assert.equal(h.sourceCalls.length, 0);
+  const source = await h.invoke('get-desktop-source');
+  assert.equal(source.ok, true);
+  assert.equal(source.sourceId, undefined);
+  assert.deepEqual(source.geometry.windowBounds, h.window.getBounds());
+  assert.deepEqual(h.sourceCalls, []);
+  assert.equal(h.nativeSessions.length, 1);
+  h.window.setPosition(30, 40);
+  h.window.setContentSize(600, 500);
+  await h.invoke('get-desktop-source');
+  assert.equal(h.nativeSessions.length, 1, 'moving and resizing reuse the active native capture');
+  h.area.width = 1400;
+  h.screen.emit('display-metrics-changed');
+  const current = await h.invoke('get-desktop-source');
+  assert.equal(current.geometry.windowBounds.x, 30);
+  assert.equal(current.geometry.windowBounds.height, 500);
+  assert.equal(current.geometry.display.width, 1400);
+  assert.equal(h.nativeSessions.length, 2, 'display metric changes restart the native capture');
+  assert.equal(h.nativeSessions[0].controller.closed, true);
+  const nativeFrame = { id: 1, ntHandle: Buffer.alloc(8, 1), width: 1280, height: 800, timestamp: 100 };
+  h.nativeSessions.at(-1).options.onFrame(nativeFrame);
+  await tick();
+  assert.equal(h.transfers.length, 1);
+  assert.equal(h.transfers[0].options.importedSharedTexture.options.textureInfo.handle.ntHandle, nativeFrame.ntHandle);
+  assert.deepEqual(h.nativeSessions.at(-1).controller.released, [1]);
+  const messages = h.window.webContents.sentMessages;
+  assert.ok(messages.some(message => message.channel === 'violet:desktop-geometry'));
+  assert.equal(messages.some(message => message.channel === 'violet:desktop-frame' || JSON.stringify(message).includes('data:image/')), false);
+});
+
+test('desktop source refresh accepts only its narrow options and topology events invalidate its cache', async t => {
+  const h = await createHarness(t);
+  for (const value of [null, false, 'refresh', [], { refresh: 1 }, { refresh: null }, { refresh: undefined }, { unknown: true }, { refresh: true, sourceId: 'screen:99:0' }]) {
+    assert.equal(h.invoke('get-desktop-source', value).error, 'invalid-desktop-source-request');
+  }
+  assert.equal(h.sourceCalls.length, 0);
+  assert.equal((await h.invoke('get-desktop-source', {})).ok, true);
+  assert.equal((await h.invoke('get-desktop-source', { refresh: false })).ok, true);
+  assert.equal(h.nativeSessions.length, 1);
+  assert.equal((await h.invoke('get-desktop-source', { refresh: true })).ok, true);
+  assert.equal(h.nativeSessions.length, 2);
+  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) {
+    h.screen.emit(event);
+    assert.equal((await h.invoke('get-desktop-source')).ok, true);
+  }
+  assert.equal(h.nativeSessions.length, 5);
+  assert.equal(h.invoke('stop-desktop-capture').ok, true);
+  assert.equal(h.nativeSessions.at(-1).controller.closed, true);
+});
+
+test('desktop permission allows only video-only display capture by the trusted main frame', async t => {
+  const h = await createHarness(t);
+  const session = h.window.webContents.session;
+  const details = { isMainFrame: true, requestingUrl: h.window.webContents.mainFrame.url, securityOrigin: 'file://' };
+  const check = (permission = 'display-capture', patch = {}, contents = h.window.webContents, origin = 'file://') =>
+    session.checkHandler(contents, permission, origin, { ...details, mediaType: 'video', ...patch });
+  const request = (permission = 'display-capture', patch = {}, contents = h.window.webContents) => {
+    let accepted;
+    session.requestHandler(contents, permission, result => { accepted = result; }, { ...details, mediaTypes: ['video'], ...patch });
+    return accepted;
+  };
+  assert.equal(check(), true);
+  assert.equal(request(), true);
+  for (const permission of ['media', 'geolocation', 'notifications', 'unknown']) {
+    assert.equal(check(permission), false);
+    assert.equal(request(permission), false);
+  }
+  for (const patch of [{ mediaType: 'audio' }, { mediaType: 'unknown' }, { mediaType: undefined }, { isMainFrame: false }, { requestingUrl: 'https://attacker.example/' }, { securityOrigin: 'https://attacker.example/' }]) assert.equal(check('display-capture', patch), false);
+  for (const patch of [{ mediaTypes: ['audio'] }, { mediaTypes: ['video', 'audio'] }, { mediaTypes: [] }, { mediaTypes: undefined }, { isMainFrame: false }, { requestingUrl: 'https://attacker.example/' }, { securityOrigin: 'https://attacker.example/' }]) assert.equal(request('display-capture', patch), false);
+  assert.equal(check('display-capture', {}, {}), false);
+  assert.equal(request('display-capture', {}, {}), false);
+  assert.equal(check('display-capture', {}, h.window.webContents, 'https://attacker.example/'), false);
+  h.window.webContents.mainFrame.url = 'https://attacker.example/';
+  assert.equal(check(), false);
+  assert.equal(request(), false);
+  h.window.webContents.mainFrame.url = details.requestingUrl;
+  h.invoke('set-glass-settings', { desktopRefraction: false });
+  assert.equal(check(), false);
+  assert.equal(request(), false);
+  assert.equal((await h.invoke('get-desktop-source')).error, 'desktop-capture-disabled');
+  assert.equal(h.window.protectionCalls.at(-1), false);
+  assert.equal(h.window.webContents.sentMessages.filter(message => message.channel === 'violet:desktop-geometry').at(-1).state, null);
+});
+
+test('development capture permissions stay on the configured local origin', async t => {
+  const h = await createHarness(t, { devURL: 'http://127.0.0.1:5173/' });
+  const session = h.window.webContents.session;
+  const details = { isMainFrame: true, requestingUrl: h.window.webContents.mainFrame.url, mediaType: 'video' };
+  assert.equal(session.checkHandler(h.window.webContents, 'display-capture', 'http://127.0.0.1:5173', details), true);
+  assert.equal(session.checkHandler(h.window.webContents, 'display-capture', 'http://127.0.0.1:5174', details), false);
+  assert.equal(session.checkHandler(h.window.webContents, 'display-capture', 'http://127.0.0.1:5173', { ...details, requestingUrl: 'http://127.0.0.1:5174/' }), false);
+});
+
+test('closing or quitting releases native self-exclusion and clears desktop geometry', async t => {
+  for (const action of ['close', 'quit']) {
+    const h = await createHarness(t);
+    assert.equal(h.window.protectionCalls.at(-1), true);
+    if (action === 'close') h.window.emit('closed'); else h.app.quit();
+    assert.equal(h.window.protectionCalls.at(-1), false);
+    assert.equal(h.window.webContents.sentMessages.filter(message => message.channel === 'violet:desktop-geometry').at(-1).state, null);
+  }
 });

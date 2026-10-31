@@ -1,4 +1,10 @@
 import type { AppState, VioletBridge } from './types'
+import { defaultGlass } from './glass-defaults'
+
+function savedGlass() {
+  try { return { ...defaultGlass, ...JSON.parse(localStorage.getItem('violet-preview-glass') || '{}') } }
+  catch { return { ...defaultGlass } }
+}
 
 // Browser-only visual preview. Electron always uses the real, isolated preload bridge.
 let preview: AppState = {
@@ -8,6 +14,7 @@ let preview: AppState = {
     { path: 'D:\\Projects\\Violet Folders', name: 'Violet Folders', parentPath: 'D:\\Projects', isPinned: false, isOpen: true },
   ],
   collapsed: false, language: 'zh-CN', launchAtLogin: false, monitorStatus: 'ready', maxHeight: 900, maxWidth: 520,
+  glass: savedGlass(),
 }
 const listeners = new Set<(state: AppState) => void>()
 const update = (patch: Partial<AppState>) => { preview = { ...preview, ...patch }; for (const listener of listeners) listener(preview) }
@@ -18,6 +25,15 @@ const browserBridge: VioletBridge = {
   togglePin: async path => update({ entries: preview.entries.map(entry => entry.path === path ? { ...entry, isPinned: !entry.isPinned } : entry) }),
   setCollapsed: async collapsed => update({ collapsed }),
   setLanguage: async language => update({ language }),
+  setGlassSettings: async patch => {
+    const glass = { ...preview.glass, ...patch }
+    update({ glass })
+    try { localStorage.setItem('violet-preview-glass', JSON.stringify(glass)) } catch { /* Preview works without storage. */ }
+    return { ok: true }
+  },
+  getDesktopSource: async () => ({ ok: false, error: 'browser-preview' }),
+  stopDesktopCapture: async () => ({ ok: true }),
+  onDesktopGeometry: () => () => {},
   setLaunchAtLogin: async launchAtLogin => { update({ launchAtLogin }); return { ok: true } },
   setContentSize: async () => {}, setInteractive: () => {}, setHitRegions: () => {}, resetPosition: async () => {}, quit: () => {},
 }

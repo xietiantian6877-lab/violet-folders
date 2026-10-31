@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readdir, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const outputDirectory = path.resolve(process.argv[2] ?? 'release');
+const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const files = (await readdir(outputDirectory, { withFileTypes: true }))
-  .filter((entry) => entry.isFile() && /\.(exe|zip)$/i.test(entry.name))
+  .filter((entry) => entry.isFile() && entry.name.startsWith(`VioletFolders-${version}-`) && /\.(exe|zip)$/i.test(entry.name))
   .map((entry) => entry.name)
   .sort();
 

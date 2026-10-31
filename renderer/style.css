@@ -64,16 +64,21 @@ svg {
 }
 .shelf {
   position: relative;
-  width: min(100%, 504px);
-  padding: 8px 12px 10px;
+  width: min(100%, calc(var(--shelf-width, 504px) + 2 * var(--elastic-x, 0px)));
+  padding: calc(8px + var(--elastic-y, 0px)) 12px 10px;
   user-select: none;
-  isolation: isolate;
 }
 .glass-frame {
+  --glass-ink: #faf3ff;
+  --glass-muted: #dfd1e9;
+  --glass-icon: #e6d0fa;
+  --glass-hover: #ffffff;
+  --glass-hover-fill: #dec4fa1c;
   position: relative;
   width: 100%;
   height: 72px;
   border-radius: 36px;
+  z-index: 1;
 }
 .liquid-surface {
   border-radius: inherit !important;
@@ -82,35 +87,60 @@ svg {
   width: 100%;
   height: 100%;
   gap: 0 !important;
-  box-shadow:
-    inset 0 1px 1px #ffffff4d,
-    inset 0 -2px 3px #b999e633,
-    0 5px 14px #0d071126 !important;
-  background: linear-gradient(
-    126deg,
-    #6f5486b8 0%,
-    #372642ba 31%,
-    #20132db8 67%,
-    #68517e76 100%
-  );
-  border: 1px solid #e3cef359;
+  box-shadow: inset 0 1px 1px #ffffff38, inset 0 -1px 2px #b999e624, 0 5px 14px #0d071126 !important;
+  background: transparent;
+  border: 0.5px solid #e3cef340;
+}
+.liquid-surface > .glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(rgb(0 0 0 / var(--glass-shade, 0)), rgb(0 0 0 / var(--glass-shade, 0))), rgb(77 37 111 / var(--glass-tint, 0.12));
+  pointer-events: none;
+  z-index: 1;
 }
 .liquid-surface > .glass::after {
   content: "";
   position: absolute;
-  inset: 3px;
+  inset: 1.5px;
   border-radius: inherit;
-  border-top: 1px solid #fff7;
-  border-bottom: 2px solid #e2caff42;
+  border-top: 0.5px solid #ffffff30;
+  border-bottom: 0.5px solid #e2caff24;
   pointer-events: none;
+  z-index: 2;
 }
 .liquid-surface > .glass > div:last-child {
   width: 100%;
   height: 100%;
+  z-index: 3 !important;
+  color: var(--glass-ink);
+  text-shadow: none !important;
 }
 .glass__warp {
-  opacity: 0.82;
   pointer-events: none;
+  z-index: 0;
+}
+.has-optical-source .glass__warp { backdrop-filter: none !important; }
+.optical-crop {
+  position: absolute;
+  pointer-events: none;
+}
+.optical-source {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.optical-preview {
+  position: absolute;
+  max-width: none;
+}
+.glass-frame.is-light-background {
+  --glass-ink: #281734;
+  --glass-muted: #4c365c;
+  --glass-icon: #69408b;
+  --glass-hover: #281734;
+  --glass-hover-fill: #6c3d8b1c;
 }
 .glass-frame > span {
   z-index: 2;
@@ -143,11 +173,9 @@ svg {
   width: 266px;
   height: 46px;
   margin-bottom: 12px;
+  margin-left: var(--elastic-x, 0px);
   border-radius: 25px;
   z-index: 3;
-}
-.header-glass .liquid-surface > .glass {
-  border-radius: 25px !important;
 }
 .toolbar {
   height: 100%;
@@ -166,7 +194,7 @@ svg {
   -webkit-app-region: drag;
 }
 .brand-mark {
-  color: #e4cbff;
+  color: var(--glass-icon);
   filter: drop-shadow(0 0 4px #dab8ff24);
 }
 .brand-name {
@@ -177,7 +205,7 @@ svg {
 .folder-count {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: #dccbe9;
+  color: var(--glass-muted);
   padding-left: 4px;
 }
 .icon-button {
@@ -189,12 +217,12 @@ svg {
   transition:
     background 0.15s,
     color 0.15s;
-  color: #ebddf7;
+  color: var(--glass-ink, #ebddf7);
 }
 .icon-button:hover,
 .icon-button.selected {
-  background: #d6b3fb28;
-  color: #fff;
+  background: var(--glass-hover-fill, #d6b3fb28);
+  color: var(--glass-hover, #fff);
 }
 .close-button:hover {
   background: #dba1c438;
@@ -207,16 +235,18 @@ svg {
   will-change: height;
 }
 .folder-list {
+  box-sizing: border-box;
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  padding: 0 0 0 0;
+  /* The scrollport includes transparent room for pointer stretch on every edge. */
+  padding: var(--elastic-y, 0px) var(--elastic-x, 0px);
 }
 .folder-entrance {
   height: 82px;
-  animation: arrive 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: arrive 0.38s cubic-bezier(0.16, 1, 0.3, 1);
   transform-origin: top center;
 }
 .folder-glass {
@@ -251,7 +281,7 @@ svg {
   place-items: center;
   width: 26px;
   height: 32px;
-  color: #e4cff8;
+  color: var(--glass-icon);
   opacity: 0.65;
 }
 .folder-symbol.is-open {
@@ -263,7 +293,7 @@ svg {
   left: 11px;
   width: 3px;
   height: 3px;
-  background: #d6b1f5;
+  background: var(--glass-icon);
   border-radius: 50%;
   opacity: 0;
 }
@@ -284,18 +314,18 @@ svg {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #f5e9ff;
-  text-shadow: 0 1px 3px #160e24a6;
+  color: var(--glass-ink);
+  text-shadow: none;
 }
 .parent-path {
   font-size: 11px;
   font-weight: 400;
   line-height: 1.15;
-  color: #dfcfea;
+  color: var(--glass-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-shadow: 0 1px 3px #160e2480;
+  text-shadow: none;
 }
 .pin-button {
   display: flex;
@@ -307,7 +337,7 @@ svg {
   height: 46px;
   flex: none;
   border-radius: 15px;
-  color: #dcc6ef;
+  color: var(--glass-icon);
   transition:
     background 0.18s,
     color 0.18s;
@@ -318,18 +348,18 @@ svg {
   font-weight: 500;
 }
 .pin-button:hover {
-  background: #dec4fa1c;
-  color: white;
+  background: var(--glass-hover-fill);
+  color: var(--glass-hover);
 }
 .pin-button.active {
   background: linear-gradient(160deg, #d3a8f747, #bd8de129);
   box-shadow: inset 0 1px 1px #f5deff20;
-  color: #f6e7ff;
+  color: var(--glass-ink);
 }
 .settings-menu {
   position: absolute;
-  top: 65px;
-  left: 12px;
+  top: calc(65px + var(--elastic-y, 0px));
+  left: calc(12px + var(--elastic-x, 0px));
   width: 266px;
   padding: 9px;
   border-radius: 18px;
@@ -459,16 +489,44 @@ kbd {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
 }
-.browser-preview:before {
-  content: "";
+.preview-scene {
   position: fixed;
   inset: 0;
-  z-index: -3;
+  z-index: 0;
+  overflow: hidden;
   background:
-    radial-gradient(ellipse at 80% 10%, #8272aa, transparent 45%),
-    radial-gradient(ellipse at 5% 75%, #37293e, transparent 60%),
-    linear-gradient(135deg, #17111e, #635677 55%, #1e1825);
+    radial-gradient(ellipse at 75% 15%, #a385d3, transparent 55%),
+    linear-gradient(135deg, #211b38, #74638b 60%, #202538);
   pointer-events: none;
+}
+.preview-orb {
+  position: absolute;
+  width: 580px;
+  height: 580px;
+  top: -180px;
+  left: 140px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 28% 70%, #e2b6f1, #825ed4 32%, #242151 64%, #d0b4e6 74%, #ffffff 76%, #693e99 78%);
+}
+.preview-word {
+  position: absolute;
+  left: 26px;
+  top: 65px;
+  color: #f0eaf8;
+  font-size: 122px;
+  font-weight: 600;
+  line-height: 0.95;
+  letter-spacing: -0.075em;
+}
+.preview-grid {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 31px, #ffffff26 31px 32px), repeating-linear-gradient(transparent 0 31px, #ffffff26 31px 32px);
+  opacity: 0.6;
+}
+.folder-viewport {
+  position: relative;
+  z-index: 1;
 }
 .browser-preview {
   min-height: 100vh;

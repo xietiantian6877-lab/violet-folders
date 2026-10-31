@@ -1,22 +1,20 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import LiquidGlass from 'liquid-glass-react'
-import { ArrowUpLeft, Check, ChevronDown, ChevronUp, Ellipsis, Folder, Languages, Pin, Power, X } from 'lucide-react'
+import { ArrowUpLeft, Check, ChevronDown, ChevronUp, Ellipsis, Folder, Languages, Pin, Power, SlidersHorizontal, X } from 'lucide-react'
 import { bridge, isBrowserPreview } from './bridge'
-import type { AppState, FolderEntry } from './types'
+import type { AppState, FolderEntry, GlassSettings } from './types'
+import { defaultGlass } from './glass-defaults'
+import GlassControls from './GlassControls'
+import { useDesktopStream } from './useDesktopStream'
+import Glass, { PreviewScene } from './Glass'
 
-const starting: AppState = { entries: [], collapsed: false, language: 'zh-CN', launchAtLogin: false, monitorStatus: 'starting', maxHeight: 800, maxWidth: 520 }
-
-function Glass({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <div className={`glass-frame ${className}`} data-interactive>
-    <LiquidGlass className="liquid-surface" cornerRadius={36} displacementScale={48} blurAmount={0.1} saturation={125} aberrationIntensity={1.2} elasticity={0} padding="0" mode="standard" style={{ position: 'absolute', top: '50%', left: '50%', width: '100%', height: '100%' }}>
-      {children}
-    </LiquidGlass>
-  </div>
-}
+const starting: AppState = { entries: [], collapsed: false, language: 'zh-CN', launchAtLogin: false, monitorStatus: 'starting', maxHeight: 800, maxWidth: 520, glass: defaultGlass }
 
 function App() {
   const [state, setState] = useState(starting)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [glassOpen, setGlassOpen] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const optics = useDesktopStream(loaded && state.glass.desktopRefraction)
   const [notice, setNotice] = useState('')
   const [opening, setOpening] = useState<string | null>(null)
   const [listHeight, setListHeight] = useState(0)
@@ -25,10 +23,16 @@ function App() {
   const menuButton = useRef<HTMLButtonElement>(null)
   const en = state.language === 'en'
   const t = (zh: string, english: string) => en ? english : zh
+  const elasticX = 8 + Math.ceil(state.glass.elasticity * 100)
+  const elasticY = 10 + Math.ceil(state.glass.elasticity * 22)
+  const shelfWidth = Math.min(504, Math.max(290, state.maxWidth - 2 * elasticX))
+  // Keep the panel and native window stationary while elasticity is adjusted.
+  const controlsShelfWidth = Math.min(720, state.maxWidth)
+  const sideControls = glassOpen && controlsShelfWidth + 360 <= state.maxWidth
 
   useEffect(() => {
     let mounted = true
-    bridge.getState().then(next => { if (mounted) setState(next) }).catch(() => setNotice('无法连接应用 / Cannot connect to app'))
+    bridge.getState().then(next => { if (mounted) { setState(next); setLoaded(true) } }).catch(() => setNotice('无法连接应用 / Cannot connect to app'))
     const unsubscribe = bridge.onState(next => setState(next))
     return () => { mounted = false; unsubscribe() }
   }, [])
@@ -37,7 +41,7 @@ function App() {
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 6000); return () => clearTimeout(timer) }, [notice])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { if (menuOpen) { setMenuOpen(false); menuButton.current?.focus({ preventScroll: true }) } else bridge.setCollapsed(true) }
+      if (event.key === 'Escape') { if (glassOpen) { setGlassOpen(false); menuButton.current?.focus({ preventScroll: true }) } else if (menuOpen) { setMenuOpen(false); menuButton.current?.focus({ preventScroll: true }) } else bridge.setCollapsed(true) }
       if (menuOpen && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
         const items = Array.from(root.current?.querySelectorAll<HTMLButtonElement>('.settings-menu > button') ?? [])
         if (!items.length) return
@@ -50,25 +54,36 @@ function App() {
     const outside = (event: PointerEvent) => { if (!(event.target as HTMLElement).closest('.settings-menu, .menu-trigger')) setMenuOpen(false) }
     document.addEventListener('keydown', onKey); document.addEventListener('pointerdown', outside)
     return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', outside) }
-  }, [menuOpen])
+  }, [menuOpen, glassOpen])
 
   useEffect(() => {
     if (menuOpen) root.current?.querySelector<HTMLButtonElement>('.settings-menu > button')?.focus({ preventScroll: true })
   }, [menuOpen])
+  useEffect(() => {
+    if (glassOpen) root.current?.querySelector<HTMLButtonElement>('.glass-controls-close')?.focus({ preventScroll: true })
+  }, [glassOpen])
 
   useLayoutEffect(() => {
     const hasNotice = Boolean(notice) || state.monitorStatus === 'error'
-    const targetHeight = state.collapsed ? 0 : Math.min(state.entries.length * 82, Math.max(0, state.maxHeight - 86 - (hasNotice ? 56 : 0)))
+    const targetHeight = state.collapsed || !state.entries.length ? 0 : Math.min(state.entries.length * 82 + 2 * elasticY, Math.max(0, state.maxHeight - 76 - elasticY - (hasNotice ? 56 : 0)))
     setListHeight(targetHeight)
-    const measuredMenu = root.current?.querySelector('.settings-menu')?.getBoundingClientRect().bottom ?? 330
-    const height = Math.ceil(Math.max(68 + targetHeight + (hasNotice ? 56 : 0), menuOpen ? measuredMenu + 14 : 68))
     // Grow before the entrance animation; delay shrinking until the fold has finished.
-    const resize = () => bridge.setContentSize({ width: Math.min(504, state.maxWidth), height, minimumHeight: menuOpen ? Math.ceil(measuredMenu + 14) : 68 })
+    const resize = () => {
+      const measuredMenu = root.current?.querySelector('.settings-menu')?.getBoundingClientRect().bottom ?? 330
+      const measuredGlass = root.current?.querySelector('.glass-controls')?.getBoundingClientRect().bottom ?? 720
+      const minimumHeight = Math.ceil(Math.max(menuOpen ? measuredMenu + 14 : 68, glassOpen ? Math.max(720, measuredGlass + 14) : 68))
+      const height = Math.ceil(Math.max(76 + elasticY + targetHeight + (hasNotice ? 56 : 0), minimumHeight))
+      return bridge.setContentSize({ width: glassOpen ? controlsShelfWidth + (sideControls ? 360 : 0) : Math.min(shelfWidth + 2 * elasticX, state.maxWidth), height, minimumHeight })
+    }
     let timer: ReturnType<typeof setTimeout> | undefined
-    if (state.collapsed && !menuOpen) timer = setTimeout(resize, 280)
+    if (state.collapsed && !menuOpen && !glassOpen) timer = setTimeout(resize, 280)
     else resize()
-    return () => { if (timer) clearTimeout(timer) }
-  }, [state.collapsed, state.entries.length, state.maxHeight, state.maxWidth, menuOpen, notice, state.monitorStatus, state.language])
+    const observer = new ResizeObserver(resize)
+    const panel = root.current?.querySelector('.glass-controls')
+    if (panel) observer.observe(panel)
+    window.addEventListener('resize', resize)
+    return () => { if (timer) clearTimeout(timer); observer.disconnect(); window.removeEventListener('resize', resize) }
+  }, [state.collapsed, state.entries.length, state.maxHeight, state.maxWidth, menuOpen, glassOpen, notice, state.monitorStatus, state.language, elasticX, elasticY, shelfWidth, controlsShelfWidth, sideControls])
 
   useLayoutEffect(() => {
     let frame = 0
@@ -76,7 +91,8 @@ function App() {
       if (!root.current) return
       const viewport = root.current.querySelector('.folder-viewport')!.getBoundingClientRect()
       const regions = Array.from(root.current.querySelectorAll<HTMLElement>('[data-interactive]')).flatMap(element => {
-        const rect = element.getBoundingClientRect()
+        const surface = element.querySelector<HTMLElement>('.liquid-surface > .glass') ?? element
+        const rect = surface.getBoundingClientRect()
         const inList = Boolean(element.closest('.folder-viewport'))
         if (inList && state.collapsed && listHeight === 0) return []
         const x = Math.max(0, rect.left)
@@ -84,19 +100,22 @@ function App() {
         const right = Math.min(window.innerWidth, rect.right)
         const bottom = Math.min(window.innerHeight, rect.bottom, inList ? viewport.bottom : window.innerHeight)
         if (right <= x || bottom <= y) return []
-        return [{ x, y, width: right - x, height: bottom - y, radius: Math.min(parseFloat(getComputedStyle(element).borderRadius) || 0, (bottom - y) / 2) }]
+        return [{ x, y, width: right - x, height: bottom - y, radius: Math.min(parseFloat(getComputedStyle(surface).borderRadius) || 0, (bottom - y) / 2) }]
       })
       bridge.setHitRegions(regions)
     }
-    const until = performance.now() + 450
-    const animate = () => { sendRegions(); if (performance.now() < until) frame = requestAnimationFrame(animate) }
+    let until = performance.now() + 450
+    const animate = () => { sendRegions(); frame = performance.now() < until ? requestAnimationFrame(animate) : 0 }
+    const schedule = () => { until = performance.now() + 450; if (!frame) frame = requestAnimationFrame(animate) }
     animate()
     const observer = new ResizeObserver(sendRegions)
     if (root.current) observer.observe(root.current)
+    const mutations = new MutationObserver(schedule)
+    root.current?.querySelectorAll('.liquid-surface').forEach(surface => mutations.observe(surface, { attributes: true, attributeFilter: ['style'] }))
     document.addEventListener('scroll', sendRegions, true)
     window.addEventListener('resize', sendRegions)
-    return () => { cancelAnimationFrame(frame); observer.disconnect(); document.removeEventListener('scroll', sendRegions, true); window.removeEventListener('resize', sendRegions) }
-  }, [state.collapsed, state.entries, listHeight, menuOpen, notice, state.monitorStatus, state.language])
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); mutations.disconnect(); document.removeEventListener('scroll', sendRegions, true); window.removeEventListener('resize', sendRegions) }
+  }, [state.collapsed, state.entries, listHeight, menuOpen, glassOpen, notice, state.monitorStatus, state.language, state.glass])
 
   const errorText = (code?: string) => {
     if (code === 'folder-unavailable') return t('文件夹不可用，请检查磁盘或网络连接。', 'Folder unavailable. Check the drive or network.')
@@ -110,8 +129,15 @@ function App() {
     finally { setOpening(null) }
   }
 
-  return <main className={`shelf ${isBrowserPreview ? 'browser-preview' : ''}`} ref={root} aria-label={t('紫璃文件夹', 'Violet Folders')}>
-    <Glass className="header-glass">
+  const updateGlass = async (patch: Partial<GlassSettings>) => {
+    setState(previous => ({ ...previous, glass: { ...previous.glass, ...patch } }))
+    try { const result = await bridge.setGlassSettings(patch); if (!result.ok) setNotice(errorText(result.error)) }
+    catch { setNotice(errorText()) }
+  }
+
+  return <main className={`shelf ${isBrowserPreview ? 'browser-preview' : ''} ${sideControls ? 'side-controls' : ''}`} ref={root} style={{ '--available-height': `${state.maxHeight}px`, '--shelf-width': `${shelfWidth}px`, '--elastic-x': `${elasticX}px`, '--elastic-y': `${elasticY}px` } as React.CSSProperties} aria-label={t('紫璃文件夹', 'Violet Folders')}>
+    {isBrowserPreview && <PreviewScene/>}
+    <Glass className="header-glass" settings={state.glass} optics={optics}>
       <header className="toolbar">
         <div className="drag-handle" title={t('拖动移动 · Ctrl+Alt+F 折叠 / 展开', 'Drag to move · Ctrl+Alt+F to fold / unfold')}>
           <svg className="brand-mark" width="21" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 5.5L9.3 18c1.2 2.4 3.3 2.4 4.6-.2L21 4M8.5 4L12 11.5 15.6 4" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -127,7 +153,7 @@ function App() {
     <div className={`folder-viewport ${state.collapsed ? 'folded' : ''}`} style={{ height: listHeight }} aria-hidden={state.collapsed}>
       <div className="folder-list" ref={list} inert={state.collapsed}>
         {state.entries.map(entry => <div className="folder-entrance" key={entry.path}>
-          <Glass className={`folder-glass ${entry.isPinned ? 'is-pinned' : ''}`}>
+          <Glass settings={state.glass} optics={optics} className={`folder-glass ${entry.isPinned ? 'is-pinned' : ''}`}>
             <article className="folder-row">
               <button className="open-folder" onClick={() => open(entry)} disabled={opening === entry.path} title={entry.path} aria-label={`${t('打开文件夹', 'Open folder')} ${entry.path}`}>
                 <span className={`folder-symbol ${entry.isOpen ? 'is-open' : ''}`}><Folder size={23} strokeWidth={1.55}/><i/></span>
@@ -147,7 +173,8 @@ function App() {
     {state.monitorStatus === 'error' && !notice && <div className="notice" role="status" data-interactive>{t('资源管理器连接中断，正在重连…', 'Explorer disconnected. Reconnecting…')}</div>}
 
     {menuOpen && <section className="settings-menu" role="menu" aria-label={t('设置', 'Settings')} data-interactive>
-      <div className="menu-title"><span>{t('紫璃文件夹', 'Violet Folders')}</span><span>1.1</span></div>
+      <div className="menu-title"><span>{t('紫璃文件夹', 'Violet Folders')}</span><span>1.2</span></div>
+      <button role="menuitem" onClick={() => { setMenuOpen(false); setGlassOpen(true) }}><SlidersHorizontal size={17}/><span>{t('液态玻璃效果', 'Liquid glass effect')}</span></button>
       <button role="menuitemcheckbox" aria-checked={state.launchAtLogin} onClick={async () => { try { const result = await bridge.setLaunchAtLogin(!state.launchAtLogin); if (!result.ok) setNotice(errorText(result.error)) } catch { setNotice(errorText()) } }}><Power size={16}/><span>{t('开机启动', 'Launch at login')}</span><span className={`toggle ${state.launchAtLogin ? 'on' : ''}`}><i/></span></button>
       <button role="menuitem" onClick={() => bridge.setLanguage(en ? 'zh-CN' : 'en')}><Languages size={17}/><span>{en ? '简体中文' : 'English'}</span><Check size={14} className="language-check"/></button>
       <button role="menuitem" onClick={() => { bridge.resetPosition(); setMenuOpen(false) }}><ArrowUpLeft size={17}/><span>{t('回到屏幕左上角', 'Move to top left')}</span></button>
@@ -157,6 +184,7 @@ function App() {
       <div className="menu-divider"/>
       <button role="menuitem" onClick={() => bridge.quit()}><X size={17}/><span>{t('退出紫璃', 'Quit Violet Folders')}</span></button>
     </section>}
+    {glassOpen && <GlassControls settings={state.glass} en={en} desktopStatus={optics.status} onChange={updateGlass} onClose={() => setGlassOpen(false)}/>}
     <span className="sr-only" role="status">{state.monitorStatus === 'starting' ? t('正在连接资源管理器', 'Connecting to Explorer') : ''}</span>
   </main>
 }

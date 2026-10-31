@@ -1,0 +1,272 @@
+.glass-controls {
+  position: absolute;
+  top: 65px;
+  left: 12px;
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(690px, calc(var(--available-height, 100vh) - 80px), calc(100vh - 80px));
+  overflow: auto;
+  padding: 17px;
+  border: 1px solid #80628f;
+  border-radius: 20px;
+  background: #21192c;
+  color: #fcf6ff;
+  box-shadow: 0 12px 30px #100b1566;
+  z-index: 21;
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-app-region: no-drag;
+  animation: menu-enter 0.16s ease-out;
+}
+.glass-controls button,
+.glass-controls input {
+  font: inherit;
+  -webkit-app-region: no-drag;
+}
+.glass-controls-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+.glass-controls-eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  color: #bca6ce;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+.glass-controls h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+.glass-controls h2 svg {
+  color: #dcbaff;
+}
+.glass-controls-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  color: #d6c7e5;
+}
+.glass-controls-close:hover {
+  background: #42304f;
+}
+.glass-controls-presets {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+.glass-controls-presets button {
+  flex: 1;
+  padding: 7px 3px;
+  border: 1px solid #705381;
+  border-radius: 9px;
+  color: #ead9f6;
+  background: #31233d;
+  min-height: 32px;
+  white-space: nowrap;
+}
+.glass-controls-presets button:hover {
+  background: #493253;
+  border-color: #b18ac9;
+}
+.glass-control-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.glass-control-heading output {
+  font-variant-numeric: tabular-nums;
+  color: #e5c7ff;
+  flex: none;
+}
+.glass-controls-mode-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin-top: 8px;
+}
+.glass-controls-mode-options button {
+  min-height: 31px;
+  padding: 5px;
+  border: 1px solid #574163;
+  border-radius: 8px;
+  color: #cdb9dd;
+  background: #291e34;
+}
+.glass-controls-mode-options button:hover {
+  background: #42304f;
+}
+.glass-controls-mode-options button[aria-pressed="true"] {
+  background: #dcbaff;
+  border-color: #dcbaff;
+  color: #271333;
+  font-weight: 600;
+}
+.glass-controls-experimental {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: #4c3545;
+  color: #f0cbdb;
+}
+.glass-controls-mode p {
+  margin: 7px 0 14px;
+  color: #bfa9d0;
+  font-size: 11px;
+  line-height: 1.5;
+  min-height: 17px;
+}
+.glass-controls-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.glass-control-range {
+  display: block;
+  min-width: 0;
+}
+.glass-control-range input {
+  display: block;
+  width: 100%;
+  margin: 5px 0 0;
+  height: 18px;
+  accent-color: #dcbaff;
+  cursor: ew-resize;
+}
+.glass-controls-switches {
+  border-top: 1px solid #c9abd526;
+  margin-top: 15px;
+  padding-top: 7px;
+}
+.glass-control-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  cursor: pointer;
+}
+.glass-control-switch > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.glass-control-switch strong {
+  font-weight: 400;
+}
+.glass-control-switch small {
+  color: #bfa9d0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.glass-control-switch input {
+  appearance: none;
+  position: relative;
+  margin: 0;
+  width: 31px;
+  height: 18px;
+  border: 1px solid #7d648d;
+  border-radius: 12px;
+  flex: none;
+  background: #51405e;
+  cursor: pointer;
+}
+.glass-control-switch input::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #d6c7e5;
+  transition: transform 0.15s;
+}
+.glass-control-switch input:checked {
+  border-color: #dcbaff;
+  background: #c39ae2;
+}
+.glass-control-switch input:checked::after {
+  background: #25132f;
+  transform: translateX(13px);
+}
+.glass-controls input:focus-visible {
+  outline: 1.5px solid #efdaff;
+  outline-offset: 3px;
+}
+.glass-controls-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #d8c2e9;
+}
+.glass-controls-status i {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: #bc99d7;
+}
+.glass-controls-status.is-unavailable {
+  color: #efd2b2;
+}
+.glass-controls-status.is-unavailable i {
+  background: #e7bb88;
+}
+.glass-controls-privacy {
+  margin: 6px 0 0;
+  color: #bfa9d0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.glass-controls-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid #c9abd526;
+  font-size: 11px;
+  color: #bfa9d0;
+}
+.glass-controls-footer button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  color: #e5c7ff;
+}
+.glass-controls-footer button:hover {
+  background: #42304f;
+}
+.shelf.side-controls > .glass-controls {
+  left: 730px;
+  top: 8px;
+  width: 340px;
+  max-height: min(690px, calc(var(--available-height, 100vh) - 24px), calc(100vh - 24px));
+}
+@media (prefers-reduced-motion: reduce) {
+  .glass-controls,
+  .glass-control-switch input::after {
+    animation: none;
+    transition: none;
+  }
+}

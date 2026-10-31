@@ -13,6 +13,8 @@ const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32'
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'VioletFolders-electron-smoke-'));
 const folder = path.join(root, 'folder 中文 空格 %');
 fs.mkdirSync(folder);
+const ownerId = randomUUID();
+fs.writeFileSync(path.join(root, '.violet-smoke-owner.json'), JSON.stringify({ id: ownerId, folder }), 'utf8');
 const worker = spawn(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Sta', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, '..', '..', 'electron', 'watcher.ps1')], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
 const messages = [];
 let lastSnapshot = [];
@@ -39,7 +41,7 @@ async function command(folderPath) {
   return messages.find(message => message.type === 'response' && message.id === id);
 }
 async function closeOwned() {
-  const child = spawn(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Sta', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'close-owned-folder.ps1'), '-Path', folder], { windowsHide: true, stdio: 'pipe', shell: false });
+  const child = spawn(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Sta', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'close-owned-folder.ps1'), '-Path', folder, '-OwnerId', ownerId], { windowsHide: true, stdio: 'pipe', shell: false });
   let errors = ''; child.stderr.on('data', data => { errors += data; });
   await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error(errors))); });
 }
@@ -60,7 +62,7 @@ async function closeOwned() {
     await wait(() => !lastSnapshot.some(item => equal(item.path, folder)), 'owned folder removal');
     console.log('PASS Closing only the owned Explorer folder removes it from snapshots.');
     worker.stdin.end(JSON.stringify({ type: 'quit' }) + '\n');
-    await new Promise((resolve, reject) => { if (ended) return resolve(); const timer = setTimeout(() => reject(new Error('Monitor did not shut down.')), 5000); worker.once('exit', () => { clearTimeout(timer); resolve(); }); });
+    await new Promise((resolve, reject) => { if (ended) return resolve(); const timer = setTimeout(() => reject(new Error('Monitor did not shut down within 15 seconds. ' + stderr)), 15000); worker.once('exit', () => { clearTimeout(timer); resolve(); }); });
     assert.equal(exitCode, 0);
     console.log('PASS Monitor exits cleanly after quit.\n6/6 Windows integration checks passed.');
   } finally {

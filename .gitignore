@@ -7,6 +7,7 @@ output/
 .playwright-cli/
 .tools/
 node_modules/
+native/desktop-capture/build/
 dist-renderer/
 dist-electron/
 release/

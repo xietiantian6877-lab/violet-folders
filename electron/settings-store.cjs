@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { normalizePath } = require('./folder-catalog.cjs');
+const { sanitizeGlassSettings } = require('./glass-settings.cjs');
 
 function numberInRange(value, fallback, minimum, maximum) {
   return typeof value === 'number' && Number.isFinite(value)
@@ -25,6 +26,7 @@ function sanitizeSettings(input) {
     pinnedPaths,
     language: settings.language === 'en' ? 'en' : 'zh-CN',
     collapsed: settings.collapsed === true,
+    glass: sanitizeGlassSettings(settings.glass),
     bounds: {
       x: numberInRange(bounds.x, 12, -1000000, 1000000),
       y: numberInRange(bounds.y, 12, -1000000, 1000000),
