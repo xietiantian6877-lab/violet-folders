@@ -1,0 +1,36 @@
+# Build output and local tools
+**/bin/
+**/obj/
+dist/
+artifacts/
+output/
+.playwright-cli/
+.tools/
+node_modules/
+dist-renderer/
+dist-electron/
+release/
+.vite/
+coverage/
+*.tsbuildinfo
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local diagnostics and user data
+*.log
+*.dmp
+settings.json
+settings.json.*
+*.tmp
+TestResults/
+.impeccable/review/
+screenshots/local/
+
+# OS metadata
+Thumbs.db
+Desktop.ini
+.DS_Store

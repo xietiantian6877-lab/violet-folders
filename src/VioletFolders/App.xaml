@@ -1,0 +1,41 @@
+<Application x:Class="VioletFolders.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" ShutdownMode="OnMainWindowClose">
+  <Application.Resources>
+    <SolidColorBrush x:Key="Ink" Color="#F5EEFF"/>
+    <SolidColorBrush x:Key="Muted" Color="#B7A9CF"/>
+    <Style TargetType="ToolTip"><Setter Property="Background" Value="#F01D142B"/><Setter Property="Foreground" Value="#F5EEFF"/><Setter Property="BorderBrush" Value="#8660A8"/><Setter Property="Padding" Value="10,7"/><Setter Property="FontSize" Value="12"/></Style>
+    <Style x:Key="QuietButton" TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource Ink}"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Padding" Value="7"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="surface" CornerRadius="9" Background="{TemplateBinding Background}" BorderThickness="1" BorderBrush="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="surface" Property="Background" Value="#386E469E"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="surface" Property="BorderBrush" Value="#E0BAFF"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="surface" Property="Background" Value="#606E469E"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="ContextMenu">
+      <Setter Property="Background" Value="#FF20182B"/><Setter Property="Foreground" Value="#FFF8FF"/><Setter Property="BorderBrush" Value="#FF806693"/><Setter Property="FontSize" Value="13"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContextMenu"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="14" Padding="6" SnapsToDevicePixels="True"><StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/></Border></ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="MenuItem">
+      <Setter Property="Foreground" Value="#FFF8FF"/><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="10,9"/><Setter Property="MinWidth" Value="228"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
+        <Grid>
+          <Border x:Name="item" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/><ColumnDefinition Width="15"/></Grid.ColumnDefinitions>
+              <Path x:Name="check" Data="M2,6 L5,9 L11,2" Width="11" Height="11" Stroke="#E8CAFF" StrokeThickness="1.8" Visibility="Collapsed" VerticalAlignment="Center"/>
+              <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
+              <Path x:Name="arrow" Grid.Column="2" Data="M2,1 L6,5 L2,9" Width="5" Height="9" Stroke="#D8C9E7" StrokeThickness="1.5" Visibility="Collapsed" VerticalAlignment="Center"/>
+            </Grid>
+          </Border>
+          <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsSubmenuOpen}" Placement="Right" HorizontalOffset="3" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+            <Border Background="#FF20182B" BorderBrush="#FF806693" BorderThickness="1" CornerRadius="12" Padding="6"><StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/></Border>
+          </Popup>
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="item" Property="Background" Value="#FF40304F"/></Trigger>
+          <Trigger Property="IsSubmenuOpen" Value="True"><Setter TargetName="item" Property="Background" Value="#FF40304F"/></Trigger>
+          <Trigger Property="IsChecked" Value="True"><Setter TargetName="check" Property="Visibility" Value="Visible"/></Trigger>
+          <Trigger Property="HasItems" Value="True"><Setter TargetName="arrow" Property="Visibility" Value="Visible"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="#CBBBD8"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="Separator"><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Separator"><Border Height="1" Background="#544E3C60" Margin="10,5"/></ControlTemplate></Setter.Value></Setter></Style>
+    <Style TargetType="ScrollBar"><Setter Property="Width" Value="6"/><Setter Property="Background" Value="Transparent"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar"><Track x:Name="PART_Track" IsDirectionReversed="True"><Track.Thumb><Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="#886C4E94" CornerRadius="3"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb></Track></ControlTemplate></Setter.Value></Setter></Style>
+  </Application.Resources>
+</Application>

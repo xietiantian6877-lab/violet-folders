@@ -1,0 +1,83 @@
+{
+  "name": "Violet Folders Electron surface",
+  "platform": "electron-react-windows",
+  "mode": "operate",
+  "authority": "User brief: purple-black liquid glass capsules using rdev/liquid-glass-react, with transparent gaps and a readable settings menu",
+  "implementation": {
+    "rendererEntry": "renderer/main.tsx",
+    "appComponent": "renderer/App.tsx",
+    "stylesheet": "renderer/style.css",
+    "viteConfig": "vite.config.mts",
+    "electronEntry": "electron/main.cjs"
+  },
+  "tokens": {
+    "colorFormat": "CSS RRGGBBAA for eight-digit hex",
+    "color": {
+      "ink": "#FAF5FF",
+      "secondary": "#D6C7E5",
+      "violet": "#DCBAFF",
+      "folderName": "#F5E9FF",
+      "parentPath": "#DFCFEA",
+      "menuSurface": "#21192C",
+      "menuHover": "#42304F",
+      "menuInk": "#FCF6FF",
+      "focus": "#EFDAFF",
+      "glassBorder": "#E3CEF359",
+      "fillGradient": ["#6F5486B8", "#372642BA", "#20132DB8", "#68517E76"],
+      "fillGradientOffsets": [0, 0.31, 0.67, 1],
+      "fillGradientAngleDeg": 126
+    },
+    "typography": {
+      "family": "Segoe UI Variable, Microsoft YaHei UI, Segoe UI, sans-serif",
+      "folderNameSizePx": 15,
+      "folderNameWeight": 600,
+      "parentPathSizePx": 11,
+      "pathLineHeight": 1.15,
+      "pathLineGapPx": 6,
+      "pinLabelSizePx": 9,
+      "brandSizePx": 13
+    },
+    "layout": {
+      "shelfMaxWidthPx": 504,
+      "shelfPaddingPx": [8, 12, 10, 12],
+      "rowHeightPx": 72,
+      "rowGapPx": 10,
+      "rowExtentPx": 82,
+      "rowRadiusPx": 36,
+      "headerWidthPx": 266,
+      "headerHeightPx": 46,
+      "headerRadiusPx": 25,
+      "headerBottomGapPx": 12,
+      "menuWidthPx": 266,
+      "menuRadiusPx": 18
+    },
+    "glass": {
+      "library": "liquid-glass-react",
+      "mode": "standard",
+      "displacementScale": 48,
+      "blurAmount": 0.1,
+      "saturation": 125,
+      "aberrationIntensity": 1.2,
+      "elasticity": 0,
+      "padding": "0"
+    },
+    "motion": {
+      "rowEntranceMs": 380,
+      "rowEntranceEasing": "cubic-bezier(.16,1,.3,1)",
+      "rowTranslationStartPx": -10,
+      "rowOpacityStart": 0.3,
+      "listFoldMs": 280,
+      "menuEntranceMs": 160,
+      "respectPrefersReducedMotion": true
+    }
+  },
+  "constraints": [
+    "No shared opaque background between folder capsules",
+    "Folder name is prominent above its parent path",
+    "Settings menu remains opaque and readable",
+    "Empty and collapsed states keep a compact header only",
+    "Pins survive Explorer closure and application restart",
+    "Transparent gaps forward pointer input where the native platform allows",
+    "No promise that CSS filters refract arbitrary desktop content"
+  ]
+}
