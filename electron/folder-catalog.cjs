@@ -92,6 +92,23 @@ class FolderCatalog {
     return changed;
   }
 
+  /** Applies a user-chosen display order. It must name every entry exactly once. */
+  reorder(folderPaths) {
+    if (!Array.isArray(folderPaths) || folderPaths.length !== this.#entries.length) return false;
+    const byKey = new Map(this.#entries.map(entry => [entry.path.toLowerCase(), entry]));
+    const next = [];
+    for (const candidate of folderPaths) {
+      const key = keyOf(candidate);
+      const entry = key && byKey.get(key);
+      if (!entry) return false;
+      byKey.delete(key);
+      next.push(entry);
+    }
+    if (next.every((entry, index) => entry === this.#entries[index])) return false;
+    this.#entries = next;
+    return true;
+  }
+
   togglePin(folderPath) {
     const key = keyOf(folderPath);
     const index = key ? this.#entries.findIndex(entry => entry.path.toLowerCase() === key) : -1;

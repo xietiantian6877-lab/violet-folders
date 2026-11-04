@@ -30,6 +30,19 @@ const sliders: { key: NumericKey; zh: string; en: string; min: number; max: numb
   { key: 'tintOpacity', zh: '紫色着色', en: 'Violet tint', min: 0, max: 0.7, step: 0.01, format: value => `${Math.round(value * 100)}%` },
 ]
 
+const inks: { value: GlassSettings['ink']; zh: string; en: string }[] = [
+  { value: 'auto', zh: '自动', en: 'Auto' },
+  { value: 'light', zh: '白色', en: 'White' },
+  { value: 'dark', zh: '黑色', en: 'Black' },
+]
+
+const frameRates: { value: number; zh: string; en: string }[] = [
+  { value: 30, zh: '30', en: '30' },
+  { value: 60, zh: '60', en: '60' },
+  { value: 120, zh: '120', en: '120' },
+  { value: 0, zh: '无限制', en: 'No limit' },
+]
+
 const presets: { zh: string; en: string; values: Partial<GlassSettings> }[] = [
   { zh: '清透', en: 'Clear', values: { mode: 'standard', displacementScale: 100, blurAmount: 0.0625, saturation: 140, aberrationIntensity: 2, tintOpacity: 0.12, overLight: false } },
   { zh: '柔雾', en: 'Frosted', values: { mode: 'standard', displacementScale: 70, blurAmount: 0.5, saturation: 150, aberrationIntensity: 1, tintOpacity: 0.18, overLight: false } },
@@ -68,6 +81,24 @@ export default function GlassControls({ settings, en, desktopStatus, onChange, o
         {modes.map(mode => <button type="button" key={mode.value} aria-pressed={settings.mode === mode.value} onClick={() => onChange({ mode: mode.value })}>{mode.label}</button>)}
       </div>
       <p>{en ? selectedMode.description : selectedMode.zh}</p>
+    </div>
+
+    <div className="glass-controls-mode">
+      <div className="glass-control-heading"><span>{t('文字颜色', 'Text colour')}</span></div>
+      <div className="glass-controls-mode-options glass-controls-ink" role="group" aria-label={t('文字颜色', 'Text colour')}>
+        {inks.map(ink => <button type="button" key={ink.value} aria-pressed={settings.ink === ink.value} onClick={() => onChange({ ink: ink.value })}>
+          <i className={`ink-swatch ink-${ink.value}`} aria-hidden="true"/>{t(ink.zh, ink.en)}
+        </button>)}
+      </div>
+      <p>{settings.ink === 'auto' ? t('根据玻璃背后的桌面亮度自动切换。', 'Switches with the brightness behind the glass.') : t('已锁定，不随背景变化。', 'Locked. Ignores the background.')}</p>
+    </div>
+
+    <div className="glass-controls-mode">
+      <div className="glass-control-heading"><span>{t('桌面刷新帧率', 'Desktop frame rate')}</span><output>{settings.frameRate ? `${settings.frameRate} FPS` : t('无限制', 'No limit')}</output></div>
+      <div className="glass-controls-mode-options glass-controls-fps" role="group" aria-label={t('桌面刷新帧率', 'Desktop frame rate')}>
+        {frameRates.map(rate => <button type="button" key={rate.value} aria-pressed={settings.frameRate === rate.value} onClick={() => onChange({ frameRate: rate.value })}>{t(rate.zh, rate.en)}</button>)}
+      </div>
+      <p>{t('只在玻璃背后的画面变化时刷新。帧率越高越跟手，也越耗电。', 'Refreshes only when the view behind the glass changes. Higher is smoother and uses more power.')}</p>
     </div>
 
     <div className="glass-controls-sliders">

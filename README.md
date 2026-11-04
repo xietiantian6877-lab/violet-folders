@@ -4,13 +4,27 @@
 
 [English](README.en.md)
 
-![紫璃文件夹 React 界面预览](docs/images/preview.png)
+![开启桌面实时折射的紫璃文件夹（深色背景）](docs/images/glass-shelf-dark.png)
 
-浏览器中的示例路径预览；实际桌面效果会随背景变化。
+以上截图均为真实 Windows 桌面上 **开启桌面实时折射** 的效果，示例路径为演示数据。
+
+| 浅色背景 · 文字锁定黑色 · 磨砂 0 | 液态玻璃设置 |
+| --- | --- |
+| ![浅色背景下锁定黑色文字](docs/images/glass-shelf-light.png) | ![液态玻璃设置面板](docs/images/glass-controls.png) |
+
+## 1.3 新变化
+
+- **更流畅**：桌面取样只在玻璃背后的画面真正变化时刷新。屏幕其他位置的视频、动画不再占用资源（实测从约 1 个 CPU 核降到约 2%）。同时修复了“自身重绘 → 被判为桌面变化 → 再次刷新”的循环。
+- **帧率可调**：设置里可选 30 / 60 / 120 / 无限制，默认 60。
+- **清晰模式**：磨砂程度拉到 0 时不再保留默认模糊，玻璃背后的桌面文字清晰可读。
+- **文字颜色可锁定**：自动 / 白色 / 黑色。锁定后不再取样背景亮度。
+- **贴边拖动不再抽搐**：拖动改为主进程逐帧限制在工作区内，靠近屏幕边缘时平滑贴边滑动。双击顶部可折叠。
+- **长按拖动排序**：长按文件夹条约 0.3 秒即可拖动，其他条目平滑让位；靠近列表上下边缘时自动滚动。排序会保存。
+- **全新界面**：更紧凑的玻璃条、圆形文件夹图标、发光常驻按钮。不再显示滚动条，改为上下渐隐。展开 / 收起带逐条错落动画。
 
 ## 直接运行
 
-双击 `H:\CZWJJ\release\VioletFolders-1.2.1-win-x64.exe`，或者解压同目录的 `VioletFolders-1.2.1-win-x64.zip` 后运行应用。便携包包含 Electron 运行时和原生捕获模块，使用时无需另装 Node.js、.NET、Visual Studio 或 Windows SDK。有仓库访问权限的用户也可以从 GitHub Release 下载。
+双击 `H:\CZWJJ\release\VioletFolders-1.3.0-win-x64.exe`，或者解压同目录的 `VioletFolders-1.3.0-win-x64.zip` 后运行应用。便携包包含 Electron 运行时和原生捕获模块，使用时无需另装 Node.js、.NET、Visual Studio 或 Windows SDK。有仓库访问权限的用户也可以从 GitHub Release 下载。
 
 1. 正常打开 Windows 文件资源管理器中的文件夹。每个检测到的路径显示为独立玻璃条，相同路径合并。
 2. 最后一级文件夹名突出显示，父路径作为辅助信息；悬停查看完整路径。
@@ -35,7 +49,7 @@
 - **浅色背景增强** 可加深玻璃；**桌面实时折射** 控制桌面取样。
 - 提供 **清透 / 柔雾 / 强折射** 预设，以及 **恢复默认**。圆角受胶囊尺寸限制，文件夹条最大为 36px，顶部控制条最大为 23px。
 
-桌面折射使用 DXGI Desktop Duplication，不开启会产生黄色捕获边框的 WGC 会话，也不合成独立的鼠标指针。画面经过 D3D11 共享纹理、Electron `sharedTexture` 和 `VideoFrame`，供所有玻璃条共同使用；每条玻璃只把自身及滤镜所需边缘区域绘制到局部 canvas，再应用磨砂、饱和度和折射。目标为 30 帧/秒，实际帧率需要在目标设备上验证。不逐帧编码 JPEG，也不通过 IPC 传输像素数组；跨进程共享 GPU 纹理。画面只在本机内存中处理，不录制、不保存、不上传。
+桌面折射使用 DXGI Desktop Duplication，不开启会产生黄色捕获边框的 WGC 会话，也不合成独立的鼠标指针。画面经过 D3D11 共享纹理、Electron `sharedTexture` 和 `VideoFrame`，供所有玻璃条共同使用；每条玻璃只把自身及滤镜所需边缘区域绘制到局部 canvas，再应用磨砂、饱和度和折射。原生层持续保留一份最新桌面纹理，并用脏矩形和像素比对判断玻璃背后（含滤镜边缘）是否真正变化；只有变化时才按设置的帧率（默认 60，可设为无限制）发送新帧，窗口移动后补发一帧。不逐帧编码 JPEG，也不通过 IPC 传输像素数组；跨进程共享 GPU 纹理。画面只在本机内存中处理，不录制、不保存、不上传。
 
 原生模块在窗口显示后及每次捕获启动前直接设置 `WDA_EXCLUDEFROMCAPTURE`，读回确认后通过 `DwmFlush` 等待桌面合成更新，避免工具包缓存的保护状态失效；验证失败时不启动捕获。关闭桌面实时折射会停止捕获并释放纹理。系统不支持或采集失败时，使用带稳定深色着色的透明玻璃回退外观，并在设置面板显示状态。
 
@@ -95,16 +109,16 @@ npm run dist        # 原生模块、渲染器及 Windows x64 EXE / ZIP 与校�
 
 ```text
 release/
-  VioletFolders-1.2.1-win-x64.exe
-  VioletFolders-1.2.1-win-x64.zip
-  VioletFolders-1.2.1-win-x64.exe.sha256
-  VioletFolders-1.2.1-win-x64.zip.sha256
+  VioletFolders-1.3.0-win-x64.exe
+  VioletFolders-1.3.0-win-x64.zip
+  VioletFolders-1.3.0-win-x64.exe.sha256
+  VioletFolders-1.3.0-win-x64.zip.sha256
   SHA256SUMS.txt
 ```
 
 ## GitHub 发布
 
-GitHub Actions 使用 Node.js 24 执行 `npm ci`、测试、构建和 Windows 打包，`npm run dist` 自动准备 Electron 运行时并构建原生捕获模块，保存 EXE、ZIP 与校验文件。推送版本标签（如 `v1.2.1`）会创建 GitHub Release；同名 Release 已存在时更新附件。仓库权限决定 Release 的可见范围。
+GitHub Actions 使用 Node.js 24 执行 `npm ci`、测试、构建和 Windows 打包，`npm run dist` 自动准备 Electron 运行时并构建原生捕获模块，保存 EXE、ZIP 与校验文件。推送版本标签（如 `v1.3.0`）会创建 GitHub Release；同名 Release 已存在时更新附件。仓库权限决定 Release 的可见范围。
 
 ## 保留的 WPF 源码
 

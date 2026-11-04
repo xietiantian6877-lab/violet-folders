@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <string>
 #include <thread>
+#include <vector>
 
 // Electron exports the Node API from its host executable. Delay loading keeps
 // the same N-API binary usable in both Node and Electron, without node.exe next
@@ -103,6 +104,22 @@ struct Capture : std::enable_shared_from_this<Capture> {
   napi_threadsafe_function callback = nullptr;
   std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
   std::chrono::steady_clock::time_point lastFrame{};
+  // One reusable GPU copy of the newest cursor-safe desktop image. Desktop
+  // updates only refresh it; a shared texture is published when the region
+  // behind the window changed or the window asked for a fresh sample.
+  com_ptr<ID3D11Texture2D> latest;
+  UINT latestWidth = 0;
+  UINT latestHeight = 0;
+  bool latestValid = false;
+  bool pendingDirty = false;
+  std::atomic<bool> forced{false};
+  std::atomic<int> intervalMs{16};
+  std::vector<BYTE> metadata;
+  // Diagnostics: desktop updates seen, updates behind the window, published frames, forced publishes, metadata fallbacks.
+  std::vector<RECT> changedRects;
+  com_ptr<ID3D11Texture2D> stagingOld, stagingNew;
+  UINT stagingWidth = 0, stagingHeight = 0;
+  std::atomic<uint32_t> statUpdates{0}, statHits{0}, statPublished{0}, statForced{0}, statFallbacks{0};
 
   ~Capture() { Close(); }
 
@@ -125,6 +142,12 @@ struct Capture : std::enable_shared_from_this<Capture> {
 
   void OpenDuplication() {
     duplication = nullptr;
+    latest = nullptr;
+    stagingOld = nullptr;
+    stagingNew = nullptr;
+    stagingWidth = stagingHeight = 0;
+    latestValid = false;
+    pendingDirty = false;
     output = nullptr;
     context = nullptr;
     device = nullptr;
@@ -180,16 +203,143 @@ struct Capture : std::enable_shared_from_this<Capture> {
     return !PtInRect(&outputDescription.DesktopCoordinates, cursor.ptScreenPos);
   }
 
-  void CopyFrame(ID3D11Texture2D* source) {
-    const auto now = std::chrono::steady_clock::now();
-    {
-      std::lock_guard lock(mutex);
-      if (closed.load() || frames.size() >= 3 || now - lastFrame < std::chrono::milliseconds(30)) return;
+  // The window rectangle in desktop-image pixels, widened for blur and
+  // displacement overscan so edge refraction also refreshes.
+  bool WindowRegion(RECT* region) {
+    RECT bounds{};
+    if (!GetWindowRect(window, &bounds)) return false;
+    constexpr LONG margin = 160;
+    const auto& desktop = outputDescription.DesktopCoordinates;
+    *region = { bounds.left - margin - desktop.left, bounds.top - margin - desktop.top,
+      bounds.right + margin - desktop.left, bounds.bottom + margin - desktop.top };
+    return true;
+  }
+
+  static bool Overlaps(RECT const& a, RECT const& b) {
+    return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  }
+
+  // Collects the parts of this desktop update that fall behind the window.
+  // Returns true when the update must count as a change without a pixel check
+  // (metadata unavailable, scrolled content, or an area too large to compare).
+  bool CollectWindowChanges(DXGI_OUTDUPL_FRAME_INFO const& information, std::vector<RECT>& changes) {
+    changes.clear();
+    RECT region{};
+    if (!WindowRegion(&region) || information.TotalMetadataBufferSize == 0) { ++statFallbacks; return true; }
+    region = { std::max<LONG>(region.left, 0), std::max<LONG>(region.top, 0),
+      std::min<LONG>(region.right, static_cast<LONG>(latestWidth)), std::min<LONG>(region.bottom, static_cast<LONG>(latestHeight)) };
+    if (region.right <= region.left || region.bottom <= region.top) return false;
+    if (metadata.size() < information.TotalMetadataBufferSize) metadata.resize(information.TotalMetadataBufferSize);
+    UINT moveBytes = 0;
+    if (FAILED(duplication->GetFrameMoveRects(static_cast<UINT>(metadata.size()), reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT*>(metadata.data()), &moveBytes))) { ++statFallbacks; return true; }
+    const auto* moves = reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT const*>(metadata.data());
+    for (UINT index = 0; index < moveBytes / sizeof(DXGI_OUTDUPL_MOVE_RECT); ++index)
+      if (Overlaps(moves[index].DestinationRect, region)) return true;
+    UINT dirtyBytes = 0;
+    if (FAILED(duplication->GetFrameDirtyRects(static_cast<UINT>(metadata.size() - moveBytes), reinterpret_cast<RECT*>(metadata.data() + moveBytes), &dirtyBytes))) { ++statFallbacks; return true; }
+    const auto* dirty = reinterpret_cast<RECT const*>(metadata.data() + moveBytes);
+    for (UINT index = 0; index < dirtyBytes / sizeof(RECT); ++index) {
+      const RECT clipped{ std::max(dirty[index].left, region.left), std::max(dirty[index].top, region.top),
+        std::min(dirty[index].right, region.right), std::min(dirty[index].bottom, region.bottom) };
+      if (clipped.right > clipped.left && clipped.bottom > clipped.top) changes.push_back(clipped);
     }
+    return false;
+  }
+
+  // Our own repaints mark the area behind the excluded window dirty even though
+  // the captured pixels are unchanged. Comparing just those rectangles breaks
+  // that feedback loop (draw -> dirty -> new frame -> draw) without missing
+  // real changes behind the glass.
+  bool PixelsChanged(ID3D11Texture2D* source, std::vector<RECT> const& changes) {
+    LONG area = 0;
+    for (auto const& change : changes) area += (change.right - change.left) * (change.bottom - change.top);
+    if (area > 1600 * 1000) return true;
+    for (auto const& change : changes) {
+      const UINT width = static_cast<UINT>(change.right - change.left);
+      const UINT height = static_cast<UINT>(change.bottom - change.top);
+      if (!stagingOld || stagingWidth < width || stagingHeight < height) {
+        D3D11_TEXTURE2D_DESC description{};
+        description.Width = std::max(width, stagingWidth);
+        description.Height = std::max(height, stagingHeight);
+        description.MipLevels = 1;
+        description.ArraySize = 1;
+        description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        description.SampleDesc.Count = 1;
+        description.Usage = D3D11_USAGE_STAGING;
+        description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        stagingOld = nullptr;
+        stagingNew = nullptr;
+        check_hresult(device->CreateTexture2D(&description, nullptr, stagingOld.put()));
+        check_hresult(device->CreateTexture2D(&description, nullptr, stagingNew.put()));
+        stagingWidth = description.Width;
+        stagingHeight = description.Height;
+      }
+      const D3D11_BOX box{ static_cast<UINT>(change.left), static_cast<UINT>(change.top), 0, static_cast<UINT>(change.right), static_cast<UINT>(change.bottom), 1 };
+      context->CopySubresourceRegion(stagingOld.get(), 0, 0, 0, 0, latest.get(), 0, &box);
+      context->CopySubresourceRegion(stagingNew.get(), 0, 0, 0, 0, source, 0, &box);
+      D3D11_MAPPED_SUBRESOURCE before{}, after{};
+      if (FAILED(context->Map(stagingOld.get(), 0, D3D11_MAP_READ, 0, &before))) return true;
+      if (FAILED(context->Map(stagingNew.get(), 0, D3D11_MAP_READ, 0, &after))) { context->Unmap(stagingOld.get(), 0); return true; }
+      bool different = false;
+      for (UINT row = 0; row < height && !different; ++row)
+        different = memcmp(static_cast<BYTE const*>(before.pData) + row * before.RowPitch, static_cast<BYTE const*>(after.pData) + row * after.RowPitch, width * 4) != 0;
+      context->Unmap(stagingNew.get(), 0);
+      context->Unmap(stagingOld.get(), 0);
+      if (different) return true;
+    }
+    return false;
+  }
+
+  void UpdateLatest(ID3D11Texture2D* source, DXGI_OUTDUPL_FRAME_INFO const& information) {
     D3D11_TEXTURE2D_DESC sourceDescription{};
     source->GetDesc(&sourceDescription);
     if (!sourceDescription.Width || !sourceDescription.Height || sourceDescription.Format != DXGI_FORMAT_B8G8R8A8_UNORM)
       throw hresult_error(E_NOTIMPL, L"Desktop duplication did not provide a BGRA surface");
+    if (!latest || latestWidth != sourceDescription.Width || latestHeight != sourceDescription.Height) {
+      D3D11_TEXTURE2D_DESC description{};
+      description.Width = sourceDescription.Width;
+      description.Height = sourceDescription.Height;
+      description.MipLevels = 1;
+      description.ArraySize = 1;
+      description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+      description.SampleDesc.Count = 1;
+      description.Usage = D3D11_USAGE_DEFAULT;
+      description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+      latest = nullptr;
+      check_hresult(device->CreateTexture2D(&description, nullptr, latest.put()));
+      latestWidth = sourceDescription.Width;
+      latestHeight = sourceDescription.Height;
+      latestValid = false;
+    }
+    bool touches = !latestValid;
+    if (!touches) {
+      std::vector<RECT>& changes = changedRects;
+      touches = CollectWindowChanges(information, changes) || (!changes.empty() && PixelsChanged(source, changes));
+    }
+    ++statUpdates;
+    if (touches) ++statHits;
+    context->CopyResource(latest.get(), source);
+    latestValid = true;
+    if (touches) pendingDirty = true;
+  }
+
+  void MaybePublish() {
+    if (!latestValid || (!pendingDirty && !forced.load())) return;
+    const auto now = std::chrono::steady_clock::now();
+    {
+      std::lock_guard lock(mutex);
+      if (closed.load() || frames.size() >= 3 || now - lastFrame < std::chrono::milliseconds(intervalMs.load())) return;
+    }
+    if (!pendingDirty) ++statForced;
+    pendingDirty = false;
+    forced.store(false);
+    ++statPublished;
+    CopyFrame(latest.get(), now);
+  }
+
+  void CopyFrame(ID3D11Texture2D* source, std::chrono::steady_clock::time_point now) {
+    D3D11_TEXTURE2D_DESC sourceDescription{};
+    source->GetDesc(&sourceDescription);
     auto frame = std::make_shared<Frame>();
     frame->id = ++sequence;
     frame->width = sourceDescription.Width;
@@ -243,29 +393,36 @@ struct Capture : std::enable_shared_from_this<Capture> {
         }
         DXGI_OUTDUPL_FRAME_INFO information{};
         com_ptr<IDXGIResource> resource;
-        const auto result = duplication->AcquireNextFrame(50, &information, resource.put());
-        if (result == DXGI_ERROR_WAIT_TIMEOUT) continue;
+        // A short wait lets rate-limited and requested frames go out promptly
+        // even while the desktop itself is static.
+        const auto result = duplication->AcquireNextFrame(16, &information, resource.put());
+        if (result == DXGI_ERROR_WAIT_TIMEOUT) { MaybePublish(); continue; }
         if (result == DXGI_ERROR_ACCESS_LOST || result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET) {
           duplication = nullptr;
           continue;
         }
         check_hresult(result);
-        struct FrameLease {
-          IDXGIOutputDuplication* duplicate;
-          ~FrameLease() { duplicate->ReleaseFrame(); }
-        } lease{duplication.get()};
-        // Pointer-only acquisitions still update visibility metadata, but can
-        // precede the first usable desktop texture. Retain the renderer's last
-        // desktop frame instead of publishing an unpresented/transparent image.
-        const bool safePointer = PointerIsSafe(information);
-        if (closed.load() || !safePointer || information.LastPresentTime.QuadPart == 0) continue;
-        DWORD affinity = WDA_NONE;
-        if (!GetWindowDisplayAffinity(window, &affinity) || affinity != WDA_EXCLUDEFROMCAPTURE) {
-          SetCaptureExclusion(window, true);
-          check_hresult(DwmFlush());
-          continue;
+        {
+          struct FrameLease {
+            IDXGIOutputDuplication* duplicate;
+            ~FrameLease() { duplicate->ReleaseFrame(); }
+          } lease{duplication.get()};
+          // Pointer-only acquisitions still update visibility metadata, but can
+          // precede the first usable desktop texture. Keep the last safe image
+          // instead of publishing an unpresented/transparent one.
+          const bool safePointer = PointerIsSafe(information);
+          if (closed.load()) continue;
+          if (safePointer && information.LastPresentTime.QuadPart != 0) {
+            DWORD affinity = WDA_NONE;
+            if (!GetWindowDisplayAffinity(window, &affinity) || affinity != WDA_EXCLUDEFROMCAPTURE) {
+              SetCaptureExclusion(window, true);
+              check_hresult(DwmFlush());
+              continue;
+            }
+            UpdateLatest(resource.as<ID3D11Texture2D>().get(), information);
+          }
         }
-        CopyFrame(resource.as<ID3D11Texture2D>().get());
+        MaybePublish();
       } catch (...) {
         duplication = nullptr;
         // Secure desktops, lock/resume and adapter resets can invalidate a
@@ -353,6 +510,37 @@ napi_value Close(napi_env env, napi_callback_info info) {
   return nullptr;
 }
 
+napi_value RequestFrame(napi_env env, napi_callback_info info) {
+  size_t argc = 0;
+  if (auto state = Unwrap(env, info, &argc, nullptr)) (*state)->forced.store(true);
+  return nullptr;
+}
+
+napi_value Stats(napi_env env, napi_callback_info info) {
+  size_t argc = 0;
+  auto state = Unwrap(env, info, &argc, nullptr);
+  napi_value result;
+  napi_create_object(env, &result);
+  if (!state) return result;
+  auto& capture = **state;
+  Property(env, result, "updates", capture.statUpdates.load());
+  Property(env, result, "hits", capture.statHits.load());
+  Property(env, result, "published", capture.statPublished.load());
+  Property(env, result, "forced", capture.statForced.load());
+  Property(env, result, "fallbacks", capture.statFallbacks.load());
+  return result;
+}
+
+napi_value SetFrameInterval(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1];
+  auto state = Unwrap(env, info, &argc, argv);
+  uint32_t milliseconds = 0;
+  if (state && argc == 1 && napi_get_value_uint32(env, argv[0], &milliseconds) == napi_ok)
+    (*state)->intervalMs.store(static_cast<int>(std::clamp<uint32_t>(milliseconds, 0, 1000)));
+  return nullptr;
+}
+
 napi_value Release(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value argv[1];
@@ -405,8 +593,11 @@ napi_value Create(napi_env env, napi_callback_info info) {
   napi_property_descriptor properties[] = {
     {"close", nullptr, Close, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"releaseFrame", nullptr, Release, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"requestFrame", nullptr, RequestFrame, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"setFrameInterval", nullptr, SetFrameInterval, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"stats", nullptr, Stats, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
-  napi_define_properties(env, controller, 2, properties);
+  napi_define_properties(env, controller, 5, properties);
   napi_value disabled;
   napi_get_boolean(env, false, &disabled);
   napi_property_descriptor cursor{"cursorCaptureEnabled", nullptr, nullptr, nullptr, nullptr, disabled, napi_enumerable, nullptr};

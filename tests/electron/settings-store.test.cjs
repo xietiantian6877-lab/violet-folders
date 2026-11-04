@@ -23,7 +23,7 @@ test('missing settings return fresh safe defaults', () => temporary(store => {
 }));
 
 test('roundtrips Unicode pins, language, collapse, glass and negative multi-monitor coordinates', () => temporary(store => {
-  const settings = { pinnedPaths: ['F:\\培训集合\\店铺授权', '\\\\server\\share\\100% 资料'], language: 'en', collapsed: true, glass: { mode: 'shader', displacementScale: 145.5, blurAmount: 0.0125, saturation: 218, aberrationIntensity: 7.5, elasticity: 0.35, cornerRadius: 28, tintOpacity: 0.21, overLight: true, desktopRefraction: false }, bounds: { x: -1920, y: 80, width: 600, height: 720 } };
+  const settings = { pinnedPaths: ['F:\\培训集合\\店铺授权', '\\\\server\\share\\100% 资料'], language: 'en', collapsed: true, glass: { mode: 'shader', displacementScale: 145.5, blurAmount: 0.0125, saturation: 218, aberrationIntensity: 7.5, elasticity: 0.35, cornerRadius: 28, tintOpacity: 0.21, overLight: true, desktopRefraction: false, ink: 'dark', frameRate: 0 }, bounds: { x: -1920, y: 80, width: 600, height: 720 } };
   store.save(settings);
   assert.deepEqual(store.load(), settings);
   assert.deepEqual(fs.readdirSync(store.directory), ['settings.json']);

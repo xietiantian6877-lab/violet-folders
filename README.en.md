@@ -4,13 +4,27 @@ A Windows folder shelf built with **Electron + React + TypeScript**, using [rdev
 
 [简体中文](README.md)
 
-![Violet Folders React UI preview](docs/images/preview.png)
+![Violet Folders with live desktop refraction on a dark background](docs/images/glass-shelf-dark.png)
 
-Browser preview with example paths. The desktop appearance varies with the background.
+All screenshots show the real Windows desktop with **live desktop refraction enabled**; the folder paths are demo data.
+
+| Light background · black text locked · blur 0 | Liquid glass settings |
+| --- | --- |
+| ![Light background with black text locked](docs/images/glass-shelf-light.png) | ![Liquid glass settings panel](docs/images/glass-controls.png) |
+
+## What's new in 1.3
+
+- **Much lighter**: the desktop sample refreshes only when the area behind the glass actually changes. Video or animation elsewhere on screen no longer costs anything (measured: about one CPU core down to about 2%). A loop where the shelf's own repaint counted as a desktop change is also gone.
+- **Adjustable frame rate**: 30 / 60 / 120 / no limit, default 60.
+- **Clear mode**: with blur at 0 there is no hidden minimum blur, so desktop text behind the glass stays sharp.
+- **Lockable text colour**: auto / white / black. Locking also skips background brightness sampling.
+- **No more jitter at screen edges**: dragging is clamped to the work area on every step, so the shelf slides along edges smoothly. Double-click the header to fold.
+- **Press-and-hold to reorder**: hold a folder row for about 0.3 s, drag it, and the other rows glide aside; the list auto-scrolls near its edges. The order is saved.
+- **Refreshed UI**: slimmer glass rows, round folder chips and a glowing pin. Edge fades replace the scrollbar, and folding and unfolding animate row by row.
 
 ## Run the portable app
 
-Run `H:\CZWJJ\release\VioletFolders-1.2.1-win-x64.exe`, or extract `VioletFolders-1.2.1-win-x64.zip` from the same directory and launch the app. The portable package includes Electron and the native capture module, so users do not need Node.js, .NET, Visual Studio, or the Windows SDK. Repository users with access can also download it from GitHub Releases.
+Run `H:\CZWJJ\release\VioletFolders-1.3.0-win-x64.exe`, or extract `VioletFolders-1.3.0-win-x64.zip` from the same directory and launch the app. The portable package includes Electron and the native capture module, so users do not need Node.js, .NET, Visual Studio, or the Windows SDK. Repository users with access can also download it from GitHub Releases.
 
 1. Open a folder in Windows File Explorer. Each detected path gets an independent glass row; duplicate paths are merged.
 2. The final folder name is prominent, with the parent path as supporting information. Hover for the complete path.
@@ -35,7 +49,7 @@ Version 1.2 uses the reference project's SVG displacement filter, RGB chromatic 
 - **Over a light background** darkens the glass; **Live desktop refraction** controls desktop sampling.
 - **Clear / Frosted / Refractive** presets and **Reset**. Radius is limited by the capsule size: up to 36px for folder rows and 23px for the header.
 
-Desktop refraction uses DXGI Desktop Duplication. It does not open a WGC session that produces a yellow capture border or composite the separate mouse pointer. Frames pass through D3D11 shared textures, Electron `sharedTexture`, and `VideoFrame` to a shared frame source. Each glass surface draws only its own area and the border needed by its filters into a local canvas, then applies blur, saturation, and displacement. The target is 30 frames per second; actual frame rate requires verification on the target device. Frames are not encoded as JPEGs or copied as pixel arrays through IPC; GPU textures are shared across processes. All processing stays in local memory, with no recording, saving, or uploading.
+Desktop refraction uses DXGI Desktop Duplication. It does not open a WGC session that produces a yellow capture border or composite the separate mouse pointer. Frames pass through D3D11 shared textures, Electron `sharedTexture`, and `VideoFrame` to a shared frame source. Each glass surface draws only its own area and the border needed by its filters into a local canvas, then applies blur, saturation, and displacement. The native layer keeps one up-to-date desktop texture and uses dirty rectangles plus a pixel comparison to tell whether the area behind the glass (including filter margins) really changed. Only then does it publish a frame, at the configured rate (default 60, or unlimited); after the window moves it sends one fresh frame. Frames are not encoded as JPEGs or copied as pixel arrays through IPC; GPU textures are shared across processes. All processing stays in local memory, with no recording, saving, or uploading.
 
 After the window is shown and before each capture starts, the native module directly sets `WDA_EXCLUDEFROMCAPTURE`, reads it back, and uses `DwmFlush` to wait for desktop composition to update. This avoids relying on a toolkit's cached protection state. Failed verification prevents capture from starting. Turning off live desktop refraction stops capture and releases its textures. Unsupported systems or capture failures use transparent glass with a stable dark tint and show the status in the controls.
 
@@ -95,16 +109,16 @@ The UI component is `renderer/App.tsx`, with mounting in `renderer/main.tsx` and
 
 ```text
 release/
-  VioletFolders-1.2.1-win-x64.exe
-  VioletFolders-1.2.1-win-x64.zip
-  VioletFolders-1.2.1-win-x64.exe.sha256
-  VioletFolders-1.2.1-win-x64.zip.sha256
+  VioletFolders-1.3.0-win-x64.exe
+  VioletFolders-1.3.0-win-x64.zip
+  VioletFolders-1.3.0-win-x64.exe.sha256
+  VioletFolders-1.3.0-win-x64.zip.sha256
   SHA256SUMS.txt
 ```
 
 ## GitHub releases
 
-GitHub Actions uses Node.js 24 to install with `npm ci`, test, build, and package Windows artifacts. `npm run dist` prepares the Electron runtime and builds the native capture module automatically. It saves the EXE, ZIP, and checksums. A version tag such as `v1.2.1` creates a GitHub Release or updates the assets of an existing release. Repository permissions determine visibility.
+GitHub Actions uses Node.js 24 to install with `npm ci`, test, build, and package Windows artifacts. `npm run dist` prepares the Electron runtime and builds the native capture module automatically. It saves the EXE, ZIP, and checksums. A version tag such as `v1.3.0` creates a GitHub Release or updates the assets of an existing release. Repository permissions determine visibility.
 
 ## Preserved WPF source
 

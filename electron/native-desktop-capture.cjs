@@ -15,6 +15,7 @@ class NativeDesktopCapture {
     this.pending = null;
     this.revision = 0;
     this.destroyed = false;
+    this.frameInterval = 16;
   }
 
   geometryChanged(geometry) {
@@ -61,11 +62,32 @@ class NativeDesktopCapture {
         throw new Error('Cursor-free desktop capture is required');
       }
       this.active = active;
+      this._applyFrameInterval();
       return { ok: true, geometry };
     } catch (error) {
       console.error('Violet desktop capture unavailable:', error?.message || 'Unknown capture error');
       return { ok: false, error: 'desktop-capture-unavailable' };
     }
+  }
+
+  // Desktop updates outside the window are filtered natively, so after the
+  // window moves or grows it asks for one sample of the newest desktop image.
+  /** Desktop samples per second behind the glass; 0 removes the limit. */
+  setFrameRate(rate) {
+    this.frameInterval = Number.isFinite(rate) && rate > 0 ? Math.max(0, Math.min(1000, Math.floor(1000 / rate))) : 0;
+    this._applyFrameInterval();
+  }
+
+  _applyFrameInterval() {
+    try { this.active?.controller.setFrameInterval?.(this.frameInterval); } catch { /* A closing capture keeps its last rate. */ }
+  }
+
+  requestFrame() {
+    try { this.active?.controller.requestFrame?.(); } catch { /* A closing capture has nothing to refresh. */ }
+  }
+
+  stats() {
+    try { return this.active?.controller.stats?.() ?? null; } catch { return null; }
   }
 
   stop() {

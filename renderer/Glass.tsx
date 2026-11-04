@@ -23,18 +23,24 @@ export default function Glass({ children, settings, optics, className = '' }: { 
   const geometryNow = useRef(optics.geometry)
   geometryNow.current = optics.geometry
   const requestDraw = useRef<() => void>(() => {})
+  const blurNow = useRef(0)
   const [warp, setWarp] = useState<HTMLElement | null>(null)
   const [lightInk, setLightInk] = useState(true)
   const header = className.includes('header-glass')
-  const radius = Math.min(settings.cornerRadius, header ? 23 : 36)
-  const blur = (settings.overLight ? 12 : 4) + settings.blurAmount * 32
+  const radius = Math.min(settings.cornerRadius, header ? 22 : 26)
+  // Blur follows the slider exactly: at 0 the desktop behind the glass stays
+  // sharp enough to read. Light-background mode adds a little frosting.
+  const blur = settings.blurAmount * 32 + (settings.overLight ? 6 : 0)
   // Include every RGB displacement and the blur kernel in the local source.
   // Sampling only the pill itself makes the refracted edges go transparent.
+  blurNow.current = blur
   const displacement = Math.abs(settings.displacementScale) * (settings.overLight ? 0.5 : 1)
   const aberration = settings.aberrationIntensity * 0.1
   const channelScale = settings.mode === 'shader' ? Math.max(1, Math.abs(1 - aberration)) : 1 + aberration
   const overscan = Math.ceil(blur * 3 + displacement * channelScale * 0.5 + 3)
   const hasSource = isBrowserPreview || Boolean(optics.source && optics.status === 'ready')
+  const autoInk = settings.ink === 'auto'
+  const darkInk = settings.ink === 'dark' || (autoInk && hasSource && !lightInk)
 
   useLayoutEffect(() => {
     const target = container.current?.querySelector<HTMLElement>('.glass__warp')
@@ -62,9 +68,12 @@ export default function Glass({ children, settings, optics, className = '' }: { 
       filter.setAttribute('width', `${100 + 2 * x}%`)
       filter.setAttribute('height', `${100 + 2 * y}%`)
       // Keep the displacement map on the pill while primitive inputs expand.
+      // Stretch the map over the whole surface: the library's "slice" crops it
+      // on wide, short rows and leaves a misaligned inner capsule.
       const map = filter.querySelector('feImage')
       map?.setAttribute('width', String(width))
       map?.setAttribute('height', String(height))
+      map?.setAttribute('preserveAspectRatio', 'none')
     }
     update()
     const observer = new ResizeObserver(update)
@@ -103,9 +112,10 @@ export default function Glass({ children, settings, optics, className = '' }: { 
       const width = parseFloat(css.width)
       const height = parseFloat(css.height)
       if (!(width > 0 && height > 0)) return
-      // Keep canvas resolution at the captured pixel density. Elastic scaling
-      // affects the sampled rectangle, never the desktop coordinate origin.
-      const density = Math.max(geometry.display.width > 0 ? frame.displayWidth / geometry.display.width : devicePixelRatio, 1)
+      // A clearly blurred sample loses nothing at half density, which quarters
+      // the pixels later filters process; light or no blur keeps full detail.
+      // Elastic scaling affects the sampled rectangle, never the desktop origin.
+      const density = Math.max(geometry.display.width > 0 ? frame.displayWidth / geometry.display.width : devicePixelRatio, 1) * (blurNow.current >= 4 ? 0.5 : 1)
       const pixelWidth = Math.max(1, Math.round(width * density))
       const pixelHeight = Math.max(1, Math.round(height * density))
       if (output.width !== pixelWidth || output.height !== pixelHeight) {
@@ -123,10 +133,10 @@ export default function Glass({ children, settings, optics, className = '' }: { 
       const { source, dest } = region
       context.drawImage(frame, source.x, source.y, source.width, source.height, dest.x, dest.y, dest.width, dest.height)
 
-      // Read only fifteen pixels four times per second; frames never enter
-      // React state or make a full-screen CPU readback.
-      if (meterContext && performance.now() >= nextMeter) {
-        nextMeter = performance.now() + 250
+      // Read only fifteen pixels twice per second, and never when the text
+      // colour is locked; frames never enter React state.
+      if (autoInk && meterContext && performance.now() >= nextMeter) {
+        nextMeter = performance.now() + 500
         const sample = getOpticalCrop({ ...args, crop: surfaceRect, output: { width: 5, height: 3 } })
         if (!sample) return
         meterContext.fillStyle = '#211b38'
@@ -168,6 +178,7 @@ export default function Glass({ children, settings, optics, className = '' }: { 
     document.addEventListener('scroll', schedule, true)
     document.addEventListener('visibilitychange', visibility)
     window.addEventListener('resize', schedule)
+    window.addEventListener('violet:motion', schedule)
     return () => {
       unsubscribe()
       cancelAnimationFrame(animation)
@@ -178,8 +189,9 @@ export default function Glass({ children, settings, optics, className = '' }: { 
       document.removeEventListener('scroll', schedule, true)
       document.removeEventListener('visibilitychange', visibility)
       window.removeEventListener('resize', schedule)
+      window.removeEventListener('violet:motion', schedule)
     }
-  }, [optics.source, warp, hasSource, settings.tintOpacity, settings.overLight, settings.saturation])
+  }, [optics.source, warp, hasSource, autoInk, settings.tintOpacity, settings.overLight, settings.saturation])
 
   useLayoutEffect(() => { requestDraw.current() }, [optics.geometry, overscan])
 
@@ -208,15 +220,16 @@ export default function Glass({ children, settings, optics, className = '' }: { 
     resize.observe(warp)
     document.addEventListener('scroll', schedule, true)
     window.addEventListener('resize', schedule)
+    window.addEventListener('violet:motion', schedule)
     schedule()
-    return () => { cancelAnimationFrame(animation); observer.disconnect(); resize.disconnect(); document.removeEventListener('scroll', schedule, true); window.removeEventListener('resize', schedule) }
+    return () => { cancelAnimationFrame(animation); observer.disconnect(); resize.disconnect(); document.removeEventListener('scroll', schedule, true); window.removeEventListener('resize', schedule); window.removeEventListener('violet:motion', schedule) }
   }, [warp, hasSource, overscan])
 
-  return <div ref={container} className={`glass-frame ${hasSource ? 'has-optical-source' : ''} ${hasSource && !lightInk ? 'is-light-background' : ''} ${className}`} data-interactive style={{ borderRadius: radius, '--glass-tint': settings.tintOpacity, '--glass-shade': hasSource ? (settings.overLight ? .38 : 0) : .52 } as React.CSSProperties}>
+  return <div ref={container} className={`glass-frame ${hasSource ? 'has-optical-source' : ''} ${darkInk ? 'is-light-background' : ''} ${className}`} data-interactive style={{ borderRadius: radius, '--glass-tint': settings.tintOpacity, '--glass-shade': hasSource ? (settings.overLight ? .38 : 0) : .52 } as React.CSSProperties}>
     <LiquidGlass className="liquid-surface" cornerRadius={radius} displacementScale={settings.displacementScale} blurAmount={settings.blurAmount} saturation={settings.saturation} aberrationIntensity={settings.aberrationIntensity} elasticity={settings.elasticity} overLight={settings.overLight} padding="0" mode={settings.mode} style={{ position: 'absolute', top: '50%', left: '50%', width: '100%', height: '100%' }}>
       {children}
     </LiquidGlass>
-    {warp && hasSource && createPortal(<div ref={crop} className="optical-crop" aria-hidden="true" style={{ inset: -overscan, filter: `blur(${blur}px) saturate(${settings.saturation}%)` }}>
+    {warp && hasSource && createPortal(<div ref={crop} className="optical-crop" aria-hidden="true" style={{ inset: -overscan, filter: `${blur > 0.05 ? `blur(${blur}px) ` : ''}saturate(${settings.saturation}%)` }}>
       {isBrowserPreview ? <div ref={preview} className="optical-preview"><PreviewScene style={{ position: 'absolute' }}/></div> : <canvas ref={canvas} className="optical-source"/>}
     </div>, warp)}
   </div>

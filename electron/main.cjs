@@ -33,11 +33,17 @@ let lastSnapshot = 0;
 let devURL = null;
 let desktopSource = null;
 let nativeDesktopCapture = null;
+let drag = null;
+let pointerHeld = false;
+let frameRequestTimer = null;
+let moveStateTimer = null;
 const requests = new Map();
 const rendererFile = path.join(__dirname, '..', 'dist-renderer', 'index.html');
 // Set this before the singleton lock and userData are resolved so packaged and
 // development runs share one predictable Roaming/Violet Folders directory.
 app.setName('Violet Folders');
+// Development-only isolated profile so diagnostics never touch the user's settings.
+if (!app.isPackaged && process.env.VIOLET_USER_DATA) app.setPath('userData', path.resolve(process.env.VIOLET_USER_DATA));
 if (!app.isPackaged && process.argv.includes('--inspect-ui')) app.commandLine.appendSwitch('remote-debugging-port', '9222');
 
 if (!app.requestSingleInstanceLock()) {
@@ -120,14 +126,17 @@ function createWindow() {
     desktopSource?.refreshProtection();
     sendState();
   });
-  window.on('move', () => { sendState(); scheduleSave(); desktopSource?.refreshGeometry(); });
-  window.on('resize', () => { sendState(); scheduleSave(); desktopSource?.refreshGeometry(); });
+  // During a drag only the refraction geometry follows every move; layout state
+  // is sent once the window settles so the renderer cannot resize mid-drag.
+  window.on('move', () => { desktopSource?.refreshGeometry(); scheduleFrameRequest(); if (!drag) { scheduleStateAfterMove(); scheduleSave(); } });
+  window.on('resize', () => { desktopSource?.refreshGeometry(); scheduleFrameRequest(); if (!drag) { sendState(); scheduleSave(); } });
   window.on('closed', () => { nativeDesktopCapture?.destroy(); nativeDesktopCapture = null; desktopSource?.destroy(); desktopSource = null; window = null; app.quit(); });
   desktopSource = new DesktopSource({ window, screen, desktopCapturer, onGeometry: geometry => {
     nativeDesktopCapture?.geometryChanged(geometry);
     if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('violet:desktop-geometry', geometry);
   } });
   nativeDesktopCapture = new NativeDesktopCapture({ window, source: desktopSource, onFrame: sendDesktopFrame });
+  nativeDesktopCapture.setFrameRate(settings.glass.frameRate);
   desktopSource.setEnabled(settings.glass.desktopRefraction);
   // Apply native exclusion before Electron adds its click-through layered
   // window state, which can reject the first display-affinity assignment.
@@ -175,15 +184,60 @@ function sendState() {
   if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('violet:state', getState());
 }
 
+// Keeps the header on screen. A window that reaches past the bottom edge is
+// shortened in place instead of being pushed upward, so it never jumps.
 function clampBounds() {
-  if (!window || window.isDestroyed()) return;
+  if (!window || window.isDestroyed() || drag) return;
   const current = window.getBounds();
   const area = screen.getDisplayMatching(current).workArea;
   const width = Math.min(current.width, area.width - 16);
-  const height = Math.min(current.height, area.height - 16);
   const x = Math.round(Math.max(area.x, Math.min(current.x, area.x + area.width - width)));
-  const y = Math.round(Math.max(area.y, Math.min(current.y, area.y + area.height - height)));
+  const y = Math.round(Math.max(area.y, Math.min(current.y, area.y + area.height - 72)));
+  const height = Math.round(Math.max(64, Math.min(current.height, area.height - 16, area.y + area.height - y)));
   if (current.x !== x || current.y !== y || current.width !== width || current.height !== height) window.setBounds({ x, y, width, height });
+}
+
+function scheduleFrameRequest() {
+  if (frameRequestTimer) return;
+  frameRequestTimer = setTimeout(() => { frameRequestTimer = null; nativeDesktopCapture?.requestFrame(); }, 120);
+}
+
+function scheduleStateAfterMove() {
+  clearTimeout(moveStateTimer);
+  moveStateTimer = setTimeout(sendState, 120);
+}
+
+// Window dragging runs here instead of through a CSS drag region: every step
+// is clamped to the work area before the window moves, so dragging against a
+// screen edge slides along it rather than fighting a later correction.
+function startDrag() {
+  if (!window || window.isDestroyed()) return;
+  stopDrag(false);
+  const cursor = screen.getCursorScreenPoint();
+  const bounds = window.getBounds();
+  drag = { offsetX: cursor.x - bounds.x, offsetY: cursor.y - bounds.y, width: bounds.width, height: bounds.height, x: bounds.x, y: bounds.y, started: Date.now(), timer: null };
+  clearTimeout(moveStateTimer);
+  setInteractive(true);
+  drag.timer = setInterval(stepDrag, 8);
+}
+
+function stepDrag() {
+  if (!drag || !window || window.isDestroyed() || Date.now() - drag.started > 120000) { stopDrag(); return; }
+  const cursor = screen.getCursorScreenPoint();
+  const area = screen.getDisplayNearestPoint(cursor).workArea;
+  const x = Math.round(Math.max(area.x, Math.min(cursor.x - drag.offsetX, area.x + area.width - drag.width)));
+  const y = Math.round(Math.max(area.y, Math.min(cursor.y - drag.offsetY, area.y + area.height - Math.min(drag.height, 72))));
+  if (x === drag.x && y === drag.y) return;
+  drag.x = x; drag.y = y;
+  window.setBounds({ x, y, width: drag.width, height: drag.height });
+}
+
+function stopDrag(settle = true) {
+  if (!drag) return;
+  clearInterval(drag.timer);
+  drag = null;
+  if (!settle) return;
+  clampBounds(); save(); sendState(); syncHitTest();
 }
 
 function save() {
@@ -285,10 +339,17 @@ function installIPC() {
     }
     return nativeDesktopCapture?.start(options?.refresh === true) || { ok: false, error: 'desktop-capture-unavailable' };
   });
+  // Development diagnostics only: native capture counters for performance checks.
+  if (!app.isPackaged) handle('violet:capture-stats', () => nativeDesktopCapture?.stats() ?? null);
   handle('violet:stop-desktop-capture', () => { nativeDesktopCapture?.stop(); return { ok: true }; });
   handle('violet:open-folder', value => {
     const folder = knownPath(value);
     return folder ? openFolder(folder) : { ok: false, error: 'invalid-folder' };
+  });
+  handle('violet:reorder', value => {
+    if (!Array.isArray(value) || value.length > 2048 || !value.every(item => typeof item === 'string' && item.length <= 32767)) return { ok: false, error: 'invalid-value' };
+    if (catalog.reorder(value)) { save(); sendState(); }
+    return { ok: true };
   });
   handle('violet:toggle-pin', value => {
     const folder = knownPath(value);
@@ -307,6 +368,7 @@ function installIPC() {
   handle('violet:set-glass-settings', value => {
     if (!validateGlassPatch(value)) return { ok: false, error: 'invalid-value' };
     settings.glass = { ...settings.glass, ...value };
+    nativeDesktopCapture?.setFrameRate(settings.glass.frameRate);
     desktopSource?.setEnabled(settings.glass.desktopRefraction);
     scheduleSave(); sendState();
     return { ok: true };
@@ -320,6 +382,7 @@ function installIPC() {
   handle('violet:set-content-size', size => {
     if (!size || typeof size !== 'object' || !Number.isFinite(size.width) || !Number.isFinite(size.height) ||
       (size.minimumHeight !== undefined && (!Number.isFinite(size.minimumHeight) || size.minimumHeight < 0 || size.minimumHeight > 1024))) return { ok: false, error: 'invalid-value' };
+    if (drag) return { ok: true };
     const area = workArea();
     const bounds = window.getBounds();
     const minimumVisible = Math.min(area.height - 16, Math.max(64, size.minimumHeight ?? Math.min(100, size.height)));
@@ -336,6 +399,18 @@ function installIPC() {
   ipcMain.on('violet:set-interactive', (event, value) => {
     if (!trusted(event) || typeof value !== 'boolean' || value === interactive) return;
     setInteractive(value);
+  });
+  // While a folder row is being dragged the whole window keeps the pointer,
+  // so passing over the transparent gaps cannot drop the gesture.
+  ipcMain.on('violet:hold-pointer', (event, value) => {
+    if (!trusted(event) || typeof value !== 'boolean') return;
+    pointerHeld = value;
+    if (value) setInteractive(true); else syncHitTest();
+  });
+  ipcMain.on('violet:drag', (event, phase) => {
+    if (!trusted(event)) return;
+    if (phase === 'start') startDrag();
+    else if (phase === 'end') stopDrag();
   });
   ipcMain.on('violet:set-hit-regions', (event, regions) => {
     if (!trusted(event) || !Array.isArray(regions) || regions.length > 2048) return;
@@ -357,7 +432,7 @@ function setInteractive(value) {
 }
 
 function syncHitTest() {
-  if (!window || window.isDestroyed()) return;
+  if (!window || window.isDestroyed() || drag || pointerHeld) return;
   if (!window.isVisible() || !hitRegions.length) { setInteractive(false); return; }
   const cursor = screen.getCursorScreenPoint();
   const bounds = window.getBounds();
@@ -440,7 +515,8 @@ app.on('before-quit', event => {
   quitting = true;
   nativeDesktopCapture?.destroy(); nativeDesktopCapture = null;
   desktopSource?.destroy(); desktopSource = null;
-  clearTimeout(restartTimer); clearTimeout(saveTimer); clearInterval(watchdog); clearInterval(hitTimer);
+  stopDrag(false);
+  clearTimeout(restartTimer); clearTimeout(saveTimer); clearTimeout(frameRequestTimer); clearTimeout(moveStateTimer); clearInterval(watchdog); clearInterval(hitTimer);
   save(); globalShortcut.unregisterAll(); tray?.destroy();
   for (const pending of requests.values()) { clearTimeout(pending.timer); pending.resolve({ ok: false, error: 'monitor-unavailable' }); }
   requests.clear();

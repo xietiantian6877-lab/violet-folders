@@ -24,6 +24,8 @@ const browserBridge: VioletBridge = {
   openFolder: async () => ({ ok: true }),
   togglePin: async path => update({ entries: preview.entries.map(entry => entry.path === path ? { ...entry, isPinned: !entry.isPinned } : entry) }),
   setCollapsed: async collapsed => update({ collapsed }),
+  reorder: async paths => update({ entries: paths.map(path => preview.entries.find(entry => entry.path === path)!).filter(Boolean) }),
+  holdPointer: () => {},
   setLanguage: async language => update({ language }),
   setGlassSettings: async patch => {
     const glass = { ...preview.glass, ...patch }
@@ -35,7 +37,7 @@ const browserBridge: VioletBridge = {
   stopDesktopCapture: async () => ({ ok: true }),
   onDesktopGeometry: () => () => {},
   setLaunchAtLogin: async launchAtLogin => { update({ launchAtLogin }); return { ok: true } },
-  setContentSize: async () => {}, setInteractive: () => {}, setHitRegions: () => {}, resetPosition: async () => {}, quit: () => {},
+  setContentSize: async () => {}, setInteractive: () => {}, setHitRegions: () => {}, dragWindow: () => {}, resetPosition: async () => {}, quit: () => {},
 }
 export const bridge = window.violet ?? browserBridge
 export const isBrowserPreview = !window.violet

@@ -1,11 +1,12 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowUpLeft, Check, ChevronDown, ChevronUp, Ellipsis, Folder, Languages, Pin, Power, SlidersHorizontal, X } from 'lucide-react'
+import { ArrowUpLeft, Check, ChevronDown, ChevronUp, Ellipsis, Languages, Power, SlidersHorizontal, X } from 'lucide-react'
 import { bridge, isBrowserPreview } from './bridge'
 import type { AppState, FolderEntry, GlassSettings } from './types'
 import { defaultGlass } from './glass-defaults'
 import GlassControls from './GlassControls'
 import { useDesktopStream } from './useDesktopStream'
 import Glass, { PreviewScene } from './Glass'
+import FolderList, { ROW_PITCH } from './FolderList'
 
 const starting: AppState = { entries: [], collapsed: false, language: 'zh-CN', launchAtLogin: false, monitorStatus: 'starting', maxHeight: 800, maxWidth: 520, glass: defaultGlass }
 
@@ -19,7 +20,6 @@ function App() {
   const [opening, setOpening] = useState<string | null>(null)
   const [listHeight, setListHeight] = useState(0)
   const root = useRef<HTMLDivElement>(null)
-  const list = useRef<HTMLDivElement>(null)
   const menuButton = useRef<HTMLButtonElement>(null)
   const en = state.language === 'en'
   const t = (zh: string, english: string) => en ? english : zh
@@ -63,9 +63,13 @@ function App() {
     if (glassOpen) root.current?.querySelector<HTMLButtonElement>('.glass-controls-close')?.focus({ preventScroll: true })
   }, [glassOpen])
 
+  const hasNotice = Boolean(notice) || state.monitorStatus === 'error'
+  // The list keeps its open height while folding, so it never overflows into a
+  // scrollbar mid-animation; only the clipping viewport changes height.
+  const openHeight = state.entries.length ? Math.min(state.entries.length * ROW_PITCH + 2 * elasticY, Math.max(0, state.maxHeight - 76 - elasticY - (hasNotice ? 56 : 0))) : 0
+
   useLayoutEffect(() => {
-    const hasNotice = Boolean(notice) || state.monitorStatus === 'error'
-    const targetHeight = state.collapsed || !state.entries.length ? 0 : Math.min(state.entries.length * 82 + 2 * elasticY, Math.max(0, state.maxHeight - 76 - elasticY - (hasNotice ? 56 : 0)))
+    const targetHeight = state.collapsed ? 0 : openHeight
     setListHeight(targetHeight)
     // Grow before the entrance animation; delay shrinking until the fold has finished.
     const resize = () => {
@@ -83,7 +87,7 @@ function App() {
     if (panel) observer.observe(panel)
     window.addEventListener('resize', resize)
     return () => { if (timer) clearTimeout(timer); observer.disconnect(); window.removeEventListener('resize', resize) }
-  }, [state.collapsed, state.entries.length, state.maxHeight, state.maxWidth, menuOpen, glassOpen, notice, state.monitorStatus, state.language, elasticX, elasticY, shelfWidth, controlsShelfWidth, sideControls])
+  }, [state.collapsed, openHeight, hasNotice, state.maxHeight, state.maxWidth, menuOpen, glassOpen, state.language, elasticX, elasticY, shelfWidth, controlsShelfWidth, sideControls])
 
   useLayoutEffect(() => {
     let frame = 0
@@ -129,6 +133,11 @@ function App() {
     finally { setOpening(null) }
   }
 
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    bridge.dragWindow('end')
+  }
+
   const updateGlass = async (patch: Partial<GlassSettings>) => {
     setState(previous => ({ ...previous, glass: { ...previous.glass, ...patch } }))
     try { const result = await bridge.setGlassSettings(patch); if (!result.ok) setNotice(errorText(result.error)) }
@@ -139,8 +148,16 @@ function App() {
     {isBrowserPreview && <PreviewScene/>}
     <Glass className="header-glass" settings={state.glass} optics={optics}>
       <header className="toolbar">
-        <div className="drag-handle" title={t('拖动移动 · Ctrl+Alt+F 折叠 / 展开', 'Drag to move · Ctrl+Alt+F to fold / unfold')}>
-          <svg className="brand-mark" width="21" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 5.5L9.3 18c1.2 2.4 3.3 2.4 4.6-.2L21 4M8.5 4L12 11.5 15.6 4" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        <div className="drag-handle" title={t('拖动移动 · 双击折叠 · Ctrl+Alt+F', 'Drag to move · Double-click to fold · Ctrl+Alt+F')}
+          onPointerDown={event => {
+            if (event.button !== 0) return
+            event.currentTarget.setPointerCapture(event.pointerId)
+            setMenuOpen(false)
+            bridge.dragWindow('start')
+          }}
+          onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
+          onDoubleClick={() => bridge.setCollapsed(!state.collapsed)}>
+          <i className="brand-mark" aria-hidden="true"/>
           <span className="brand-name">{t('紫璃', 'Violet')}</span>
           <span className="folder-count" aria-label={t('文件夹数量', 'Folder count')}>{state.entries.length}</span>
         </div>
@@ -150,30 +167,15 @@ function App() {
       </header>
     </Glass>
 
-    <div className={`folder-viewport ${state.collapsed ? 'folded' : ''}`} style={{ height: listHeight }} aria-hidden={state.collapsed}>
-      <div className="folder-list" ref={list} inert={state.collapsed}>
-        {state.entries.map(entry => <div className="folder-entrance" key={entry.path}>
-          <Glass settings={state.glass} optics={optics} className={`folder-glass ${entry.isPinned ? 'is-pinned' : ''}`}>
-            <article className="folder-row">
-              <button className="open-folder" onClick={() => open(entry)} disabled={opening === entry.path} title={entry.path} aria-label={`${t('打开文件夹', 'Open folder')} ${entry.path}`}>
-                <span className={`folder-symbol ${entry.isOpen ? 'is-open' : ''}`}><Folder size={23} strokeWidth={1.55}/><i/></span>
-                <span className="path-text"><strong>{entry.name}</strong><span className="parent-path">{entry.parentPath || t('磁盘根目录', 'Drive root')}</span></span>
-              </button>
-              <button className={`pin-button ${entry.isPinned ? 'active' : ''}`} onClick={() => bridge.togglePin(entry.path)} aria-pressed={entry.isPinned} title={entry.isPinned ? t('取消常驻', 'Unpin folder') : t('常驻：关闭后仍保留', 'Pin: keep after closing')} aria-label={`${entry.isPinned ? t('取消常驻', 'Unpin') : t('常驻', 'Pin')} ${entry.name}`}>
-                {entry.isPinned ? <Pin size={15} fill="currentColor" strokeWidth={1.4}/> : <Pin size={15} strokeWidth={1.6}/>}
-                <span>{entry.isPinned ? t('常驻', 'Kept') : t('固定', 'Pin')}</span>
-              </button>
-            </article>
-          </Glass>
-        </div>)}
-      </div>
-    </div>
+    <FolderList entries={state.entries} collapsed={state.collapsed} height={listHeight} openHeight={openHeight} settings={state.glass} optics={optics} opening={opening} t={t}
+      onOpen={open} onTogglePin={entry => bridge.togglePin(entry.path)}
+      onReorder={paths => { bridge.reorder(paths).catch(() => setNotice(errorText())) }}/>
 
     {notice && <div className="notice" role="status" data-interactive>{notice}<button className="icon-button" aria-label={t('关闭提示', 'Dismiss notice')} onClick={() => setNotice('')}><X size={15}/></button></div>}
     {state.monitorStatus === 'error' && !notice && <div className="notice" role="status" data-interactive>{t('资源管理器连接中断，正在重连…', 'Explorer disconnected. Reconnecting…')}</div>}
 
     {menuOpen && <section className="settings-menu" role="menu" aria-label={t('设置', 'Settings')} data-interactive>
-      <div className="menu-title"><span>{t('紫璃文件夹', 'Violet Folders')}</span><span>1.2</span></div>
+      <div className="menu-title"><span>{t('紫璃文件夹', 'Violet Folders')}</span><span>1.3</span></div>
       <button role="menuitem" onClick={() => { setMenuOpen(false); setGlassOpen(true) }}><SlidersHorizontal size={17}/><span>{t('液态玻璃效果', 'Liquid glass effect')}</span></button>
       <button role="menuitemcheckbox" aria-checked={state.launchAtLogin} onClick={async () => { try { const result = await bridge.setLaunchAtLogin(!state.launchAtLogin); if (!result.ok) setNotice(errorText(result.error)) } catch { setNotice(errorText()) } }}><Power size={16}/><span>{t('开机启动', 'Launch at login')}</span><span className={`toggle ${state.launchAtLogin ? 'on' : ''}`}><i/></span></button>
       <button role="menuitem" onClick={() => bridge.setLanguage(en ? 'zh-CN' : 'en')}><Languages size={17}/><span>{en ? '简体中文' : 'English'}</span><Check size={14} className="language-check"/></button>

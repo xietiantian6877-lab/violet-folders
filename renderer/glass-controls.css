@@ -1,16 +1,16 @@
 .glass-controls {
   position: absolute;
-  top: 65px;
-  left: 12px;
+  top: calc(60px + var(--elastic-y, 0px));
+  left: calc(12px + var(--elastic-x, 0px));
   width: min(340px, calc(100vw - 24px));
   max-height: min(690px, calc(var(--available-height, 100vh) - 80px), calc(100vh - 80px));
   overflow: auto;
   padding: 17px;
-  border: 1px solid #80628f;
+  border: 1px solid #ffffff1c;
   border-radius: 20px;
-  background: #21192c;
+  background: #1b1522;
   color: #fcf6ff;
-  box-shadow: 0 12px 30px #100b1566;
+  box-shadow: 0 18px 40px #07040a73, inset 0 1px 0 #ffffff0f;
   z-index: 21;
   font-size: 12px;
   line-height: 1.4;
@@ -269,4 +269,28 @@
     animation: none;
     transition: none;
   }
+}
+
+/* Text colour lock */
+.glass-controls-ink {
+  grid-template-columns: repeat(3, 1fr);
+}
+.glass-controls-ink button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.ink-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid #ffffff40;
+  flex: none;
+}
+.ink-auto { background: linear-gradient(90deg, #fff 50%, #15101a 50%); }
+.ink-light { background: #fff; }
+.ink-dark { background: #15101a; border-color: #ffffff59; }
+.glass-controls-fps {
+  grid-template-columns: repeat(4, 1fr);
 }

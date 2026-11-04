@@ -4,6 +4,9 @@ export interface GlassSettings {
   displacementScale: number; blurAmount: number; saturation: number;
   aberrationIntensity: number; elasticity: number; cornerRadius: number;
   tintOpacity: number; overLight: boolean; desktopRefraction: boolean;
+  ink: 'auto' | 'light' | 'dark';
+  /** Desktop samples per second behind the glass; 0 = unlimited. */
+  frameRate: number;
 }
 export interface DesktopGeometry {
   display: { id: string; x: number; y: number; width: number; height: number };
@@ -24,6 +27,8 @@ export interface VioletBridge {
   onState(callback: (state: AppState) => void): () => void;
   openFolder(path: string): Promise<Result>;
   togglePin(path: string): Promise<unknown>;
+  reorder(paths: string[]): Promise<unknown>;
+  holdPointer(held: boolean): void;
   setCollapsed(collapsed: boolean): Promise<unknown>;
   setLanguage(language: 'zh-CN' | 'en'): Promise<unknown>;
   setLaunchAtLogin(enabled: boolean): Promise<Result>;
@@ -34,6 +39,7 @@ export interface VioletBridge {
   setContentSize(size: { width: number; height: number; minimumHeight?: number }): Promise<unknown>;
   setInteractive(interactive: boolean): void;
   setHitRegions(regions: { x: number; y: number; width: number; height: number; radius?: number }[]): void;
+  dragWindow(phase: 'start' | 'end'): void;
   resetPosition(): Promise<unknown>;
   quit(): void;
 }

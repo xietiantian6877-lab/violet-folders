@@ -97,3 +97,21 @@ test('restored pins sanitize duplicates and exposed state cannot mutate internal
   assert.throws(() => catalog.pinnedPaths.push('C:\\Injected'), TypeError);
   assert.equal(catalog.find('C:\\A').isPinned, true);
 });
+
+test('folders can be reordered only by a full permutation of the shelf', () => {
+  const paths = list => list.map(name => normalizePath(`C:/${name}`));
+  const catalog = new FolderCatalog(paths(['A', 'B']));
+  catalog.reconcile([{ path: 'C:/C', windowHandle: 1 }]);
+  assert.deepEqual(catalog.entries.map(entry => entry.path), paths(['A', 'B', 'C']));
+  assert.equal(catalog.reorder(['c:/c', 'C:/A', 'C:/B']), true);
+  assert.deepEqual(catalog.entries.map(entry => entry.path), paths(['C', 'A', 'B']));
+  assert.deepEqual(catalog.pinnedPaths, paths(['A', 'B']));
+  assert.equal(catalog.reorder(paths(['C', 'A', 'B'])), false, 'unchanged order');
+  for (const invalid of [null, paths(['A']), paths(['A', 'A', 'B']), paths(['A', 'B', 'D']), paths(['A', 'B', 'C', 'C'])]) {
+    assert.equal(catalog.reorder(invalid), false);
+  }
+  assert.deepEqual(catalog.entries.map(entry => entry.path), paths(['C', 'A', 'B']));
+  // Explorer snapshots keep the chosen order and append new folders.
+  catalog.reconcile([{ path: 'C:/C', windowHandle: 1 }, { path: 'C:/D', windowHandle: 2 }]);
+  assert.deepEqual(catalog.entries.map(entry => entry.path), paths(['C', 'A', 'B', 'D']));
+});

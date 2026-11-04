@@ -1,6 +1,8 @@
 'use strict';
 
 const GLASS_MODES = new Set(['standard', 'polar', 'prominent', 'shader']);
+// Text colour: follow the desktop brightness, or stay locked light or dark.
+const GLASS_INKS = new Set(['auto', 'light', 'dark']);
 const GLASS_RANGES = Object.freeze({
   displacementScale: [0, 200],
   blurAmount: [0, 1],
@@ -9,6 +11,8 @@ const GLASS_RANGES = Object.freeze({
   elasticity: [0, 1],
   cornerRadius: [0, 100],
   tintOpacity: [0, 0.7],
+  // Desktop refresh rate behind the glass; 0 means unlimited.
+  frameRate: [0, 240],
 });
 
 const DEFAULT_GLASS_SETTINGS = Object.freeze({
@@ -22,6 +26,8 @@ const DEFAULT_GLASS_SETTINGS = Object.freeze({
   tintOpacity: 0.12,
   overLight: false,
   desktopRefraction: true,
+  ink: 'auto',
+  frameRate: 60,
 });
 
 function isRecord(value) {
@@ -34,9 +40,10 @@ function sanitizeGlassSettings(input) {
   const settings = isRecord(input) ? input : {};
   const sanitized = { ...DEFAULT_GLASS_SETTINGS };
   if (GLASS_MODES.has(settings.mode)) sanitized.mode = settings.mode;
+  if (GLASS_INKS.has(settings.ink)) sanitized.ink = settings.ink;
   for (const [key, [minimum, maximum]] of Object.entries(GLASS_RANGES)) {
     const value = settings[key];
-    if (typeof value === 'number' && Number.isFinite(value)) sanitized[key] = Math.max(minimum, Math.min(maximum, value));
+    if (typeof value === 'number' && Number.isFinite(value)) sanitized[key] = Math.max(minimum, Math.min(maximum, key === 'frameRate' ? Math.round(value) : value));
   }
   for (const key of ['overLight', 'desktopRefraction']) {
     if (typeof settings[key] === 'boolean') sanitized[key] = settings[key];
@@ -54,9 +61,10 @@ function validateGlassPatch(patch) {
     if (!Object.hasOwn(DEFAULT_GLASS_SETTINGS, key)) return false;
     const value = patch[key];
     if (key === 'mode') return GLASS_MODES.has(value);
+    if (key === 'ink') return GLASS_INKS.has(value);
     if (key === 'overLight' || key === 'desktopRefraction') return typeof value === 'boolean';
     const [minimum, maximum] = GLASS_RANGES[key];
-    return typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum;
+    return typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum && (key !== 'frameRate' || Number.isInteger(value));
   });
 }
 

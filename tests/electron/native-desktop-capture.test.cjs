@@ -95,3 +95,26 @@ test('a surface failure releases its frame exactly once', async t => {
   h.sessions[0].options.onFrame({ id: 1 });
   assert.deepEqual(h.sessions[0].controller.released, [1]);
 });
+
+test('a moved window asks the active capture for one fresh desktop sample', async t => {
+  let requests = 0;
+  const h = fixture(t, { controller: { requestFrame() { requests += 1; } } });
+  h.capture.requestFrame();
+  assert.equal(requests, 0, 'nothing to refresh before capture starts');
+  assert.equal((await h.capture.start()).ok, true);
+  h.capture.requestFrame();
+  assert.equal(requests, 1);
+  h.capture.stop();
+  h.capture.requestFrame();
+  assert.equal(requests, 1, 'a stopped capture is not refreshed');
+});
+
+test('frame rate settings become native frame intervals, including unlimited', async t => {
+  const intervals = [];
+  const h = fixture(t, { controller: { setFrameInterval(ms) { intervals.push(ms); } } });
+  h.capture.setFrameRate(30);
+  assert.equal((await h.capture.start()).ok, true);
+  h.capture.setFrameRate(60);
+  h.capture.setFrameRate(0);
+  assert.deepEqual(intervals, [33, 16, 0]);
+});
